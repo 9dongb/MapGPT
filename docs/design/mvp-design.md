@@ -15,7 +15,7 @@
 | 항목 | 결정 |
 |---|---|
 | LLM | 운영은 **OpenAI**, 로컬 테스트는 **Ollama**. 환경변수로 전환한다. |
-| Ollama 모델 | 이번 작업에서는 받지 않는다. 실제 LLM E2E는 모델이나 키가 준비되면 수행한다. |
+| Ollama 모델 | 사용자가 `qwen3.5:9b`를 준비했다. 실제 LLM E2E는 이 모델로 수행한다 (OpenAI는 키가 준비되면 같은 테스트로 확인). |
 | 어린이집 데이터 | 서울 열린데이터광장 `ChildCareInfo` API. 사용자가 `SEOUL_OPEN_API_KEY`를 `.env`에 설정한다. |
 | 경계·인구 원본 | 다운로드 허용 (`data/raw/`, git 제외) |
 | 커밋 | 설계 1커밋(AGENTS.md·전달 문서 포함) + 구현 1커밋 |
@@ -87,9 +87,8 @@ MapGPT/
 ├── docs/design/mvp-design.md   # 본 문서
 ├── app/
 │   ├── config.py               # Settings (pydantic-settings, .env)
-│   ├── db.py                   # psycopg ConnectionPool
-│   ├── cli.py                  # init-db / ingest / analyze
-│   ├── db/schema.sql           # DDL (idempotent)
+│   ├── cli.py                  # init-db / download / ingest / analyze
+│   ├── db/                     # connect·init_schema + schema.sql (DDL, idempotent)
 │   ├── domain/                 # ── Core Contract ──
 │   │   ├── base.py             # StrictModel (extra="forbid")
 │   │   ├── enums.py
@@ -137,8 +136,9 @@ MapGPT/
 │   ├── unit/                   # DB·네트워크 없음
 │   ├── integration/            # PostGIS 필요 (mapgpt_test DB)
 │   ├── e2e/                    # 실제 데이터 + 실제 LLM (opt-in)
-│   ├── fixtures/               # 소형 GeoJSON/CSV/API JSON 샘플
-│   └── fakes.py                # FakeLLM
+│   ├── fixtures/               # 소형 GeoJSON 샘플, 첫 Use Case 기대 Plan
+│   ├── fakes.py                # FakeLLM
+│   └── support.py              # 공용 테스트 헬퍼
 ├── frontend/                   # Vite + React + TypeScript + maplibre-gl
 └── data/raw/                   # 원본 데이터 (gitignore)
 ```
@@ -235,9 +235,9 @@ class DatasetMetadata(StrictModel):
 |---|---|---|---|
 | `emd_boundary` | `adm_cd`(10자리), `adm_nm`(동명), `sido_cd`, `sido_nm`, `sigungu_cd`, `sigungu_nm`, `geom` | `adm_cd` (administrative_code, mois_adm_cd) | emd / MultiPolygon / EPSG:4326 / 서울특별시 |
 | `population_by_age` | `adm_cd`, `age`(0~110, 110=110세 이상), `population`(남+여), `reference_date` | `adm_cd` (동일) | emd / 지오메트리 없음 / 서울특별시 |
-| `daycare_facility` | `facility_id`(STCODE), `name`, `facility_type`(국공립·민간·가정…), `latitude`, `longitude`, `reference_date`, `geom` | 없음(공간 관계로 결합) | Point / EPSG:4326 / 서울특별시 |
+| `daycare_facility` | `facility_id`(STCODE), `name`, `facility_type`(국공립·민간·가정…), `latitude`, `longitude`, `geom` (기준 시점은 Dataset temporal) | 없음(공간 관계로 결합) | Point / EPSG:4326 / 서울특별시 |
 
-`daycare_facility`의 포함 기준은 운영현황이 '정상'이고 좌표 품질 규칙을 통과한 시설이다(13.3). 제외 건수는 `quality_notes`에 기록한다.
+`daycare_facility`의 포함 기준은 운영현황이 '정상' 또는 '재개'이고 좌표 품질 규칙을 통과한 시설이다(13.3). 제외 건수는 `quality_notes`에 기록한다.
 
 ---
 
@@ -431,7 +431,7 @@ class AgentState(BaseModel):
     dataset_candidates: list[DatasetMetadata] = []   # LLM이 본 메타데이터를 그대로 기록
     selected_datasets: list[str] = []
     analysis_plan: AnalysisPlan | None = None
-    plan_attempts: int = 0
+    plan_history: list[PlanAttempt] = []   # 재생성을 포함한 모든 계획 시도 (plan + 검증 결과)
     plan_validation: ValidationReport | None = None
     execution_results: ExecutionResult | None = None
     result_validation: ValidationReport | None = None
@@ -606,7 +606,7 @@ CREATE TABLE datasets.population_by_age (
 CREATE TABLE datasets.daycare_facility (
   facility_id text PRIMARY KEY, name text NOT NULL, facility_type text,
   latitude double precision NOT NULL, longitude double precision NOT NULL,
-  reference_date date NOT NULL, geom geometry(Point, 4326) NOT NULL
+  geom geometry(Point, 4326) NOT NULL
 );
 CREATE INDEX ON datasets.daycare_facility USING gist (geom);
 
@@ -638,7 +638,7 @@ CREATE TABLE analysis.result (
 
 ### 13.3 어린이집 좌표 품질 규칙 (적재 시, 결정론적)
 
-1. 운영현황 `정상`만 포함한다(휴지·폐지 제외).
+1. 운영현황 `정상`·`재개`(휴지 후 운영 재개)만 포함한다(휴지·폐지·미기재 제외).
 2. 좌표가 없거나, 파싱되지 않거나, 대한민국 범위 밖이면 제외한다.
 3. **서로 다른 자치구의 시설들이 같은 좌표를 공유하면** 기본값 좌표로 보고, 그 좌표의 시설을 모두 제외한다(서울시청 기본값 대응).
 4. 좌표가 위치한 자치구가 신고 자치구(`STCODE` 앞 5자리)와 다르거나 서울 경계 밖이면 제외한다.
@@ -671,7 +671,7 @@ class FinalResponse(StrictModel):
     limitations: list[str]
 ```
 
-**UI (frontend/)**: 질문 입력, 단계 진행 표시, MapLibre Choropleth(5분위, 낮을수록 진한 색으로 부족을 강조, null은 회색, hover 툴팁), 랭킹 표(순위·자치구·동·어린이집 수·0~5세 인구·지표), Metric/Dataset(기준 시점)/분석 방법/가정/한계 패널, 실패 시 단계와 오류 목록. 배경지도는 키가 필요 없는 CARTO Positron 래스터 타일(© OpenStreetMap, © CARTO)이다. 개발 서버는 `/api`를 FastAPI로 프록시한다.
+**UI (frontend/)**: 질문 입력, 단계 진행 표시, MapLibre Choropleth(5분위, 낮을수록 진한 색으로 부족을 강조, null은 회색, hover 툴팁), 랭킹 표(순위·자치구·동·어린이집 수·0~5세 인구·지표), Metric/Dataset(기준 시점)/분석 방법/가정/한계 패널, 실패 시 단계와 오류 목록. 배경지도는 키가 필요 없는 OpenFreeMap 벡터 스타일(positron / dark, © OpenMapTiles · OpenStreetMap)이다. 개발 서버는 `/api`를 FastAPI로 프록시한다.
 
 ---
 
@@ -709,7 +709,7 @@ Validation(5)을 LLM 연동(6)보다 먼저 한다. LLM 출력은 처음부터 �
 1. 데이터는 서울만 적재한다(coverage = 서울특별시). 다른 지역 질문은 Plan Validation에서 `REGION_NOT_COVERED`로 명시적으로 실패한다.
 2. 행정동 코드는 행정안전부 10자리 행정기관코드로 통일한다(통계청 8자리 미사용).
 3. 0~5세는 주민등록 기준 만 나이 0~5세(1세 단위 남+여 합계)다. 이 개념 정의는 분석 정책에 둔다.
-4. 어린이집 수는 운영 중('정상') 시설 수다. 정원·현원은 반영하지 않는다(한계로 명시).
+4. 어린이집 수는 운영 중('정상'·'재개') 시설 수다. 정원·현원은 반영하지 않는다(한계로 명시).
 5. 데이터 기준 시점은 경계 2026-07-01, 인구 2026-09-30, 어린이집 2026-10-07이며 서로 다르다는 점을 한계로 명시한다.
 6. 경계선 위의 시설은 하나의 행정동에만 배정한다(코드 오름차순 우선).
 7. 순위는 표준 경쟁 순위이고 null은 제외한다. 기본 상위 10개다.
@@ -727,3 +727,25 @@ Validation(5)을 LLM 연동(6)보다 먼저 한다. LLM 출력은 처음부터 �
 ## 부록 C. 이번 범위에서 하지 않는 것
 
 전달 문서 30번 목록을 그대로 따른다(pgvector, Vector DB, Dynamic Discovery, Multi-Agent, MCP, OGC API, Sedona, Raster, Routing, Isochrone, 입지 최적화, Knowledge Graph, 임의 코드/SQL 실행, Plugin System). 그 밖에 다음도 하지 않는다: 비동기 Job 큐, 마이그레이션 도구(Alembic), 인증, Vector Tile, 지역 계층(시군구 단위 질의) 해석.
+
+## 부록 D. 구현 중 변경·보완 사항
+
+설계를 따르되 구현과 검증 과정에서 아래를 바꾸거나 보완했다.
+
+| 항목 | 내용 | 이유 |
+|---|---|---|
+| 배경지도 | CARTO 래스터 → OpenFreeMap 벡터 스타일, Choropleth는 도로·면 위·레이블 아래에 삽입 | CARTO 타일이 API 키를 요구하게 되어 워터마크가 표시됨 |
+| MapLibre worker | `maplibre-gl-worker.mjs?worker&url` + `setWorkerUrl` | MapLibre v6는 번들러 환경에서 worker 경로를 직접 지정해야 함 |
+| Choropleth 색 | 단일 색상(blue) ordinal 5단계, 라이트는 진할수록·다크는 밝을수록 공급 부족, 값 없음은 회색 | 부족 지역 강조. dataviz `validate_palette.js --ordinal` 라이트·다크 모두 통과 |
+| FinalResponse | `metric_labels`(output → label), `rank_metric` 추가 | 랭킹 표·툴팁 열 이름과 전체 표의 순위 열을 결정론적으로 제공 |
+| Plan Validator | `BOUNDARY_FILTER_UNSUPPORTED`, `BOUNDARY_NOT_ANALYSIS_UNIT`, `DUPLICATE_FILTER`, `FIELD_UNKNOWN`, `FIELD_NOT_NUMERIC` 추가 | 경계 Dataset 필터는 기대 단위 수 검증과 충돌하고, 공간 집계 결과는 분석 단위에 키가 맞아야 함 |
+| Workflow 검증 | 해석 단계에서 데이터 없는 지역은 `REGION_NOT_SUPPORTED`로 바로 종료, 계획 검증에 `PLAN_INTERPRETATION_MISMATCH`(Plan이 해석된 intent·지역·단위를 바꾸지 않았는지) 추가 | LLM이 지원 지역으로 몰래 바꾸는 것을 결정론적으로 차단하고 불필요한 LLM 호출을 줄임 |
+| GIS 런타임 객체 | `DatasetView`·`BoundaryView`·`MetricValues`는 dataclass | 외부 계약이 아닌 실행 중 참조 객체. 계약(로그·결과)은 Pydantic으로 남김 |
+| 실행 트랜잭션 | load_data~create_map_layer를 하나의 `REPEATABLE READ, READ ONLY` 트랜잭션에서 실행 | 단계 사이 데이터 일관성, 쓰기 차단 |
+| 어린이집 운영 기준 | 운영현황 `정상`과 `재개`를 운영 중으로 포함 | 실데이터 확인 결과 `재개` 75건은 폐지일이 없고 대부분 현원이 있는 운영 시설 |
+| 어린이집 행별 기준일 | 원본 `DATASTDRDT`를 열로 두지 않고 최댓값을 Dataset 기준 시점으로만 기록 | 행별 값은 시설 정보 갱신일이라 기준일 필터로 오인되어, 실제 LLM이 정상 시설 45건을 제외하는 계획을 만들었음 |
+| Plan Validator | `OUTPUT_METRIC_IS_RANK` 추가 | 실제 LLM이 순위 결과를 지도 지표로 지정하는 오류를 반복해, 고칠 방향을 담은 피드백이 필요했음 |
+| Provenance | `plan_attempts`(횟수) 대신 `plan_history`(시도별 Plan·검증 결과) | 재생성 전후의 판단을 모두 추적 |
+| Ollama | `OLLAMA_REASONING_EFFORT`(선택) → `reasoning_effort` | thinking 모델(qwen3.5:9b) 해석 단계가 130초→6초로 단축되어 로컬 E2E가 실용적이 됨 |
+| 플래너·해석 프롬프트 | 요구되지 않은 필터(기준일·유형 전체 나열) 금지, 정책 정의를 가정으로 반복하지 않기 | 실제 LLM 실행에서 관찰된 과잉 조건·중복 가정 |
+

@@ -1,0 +1,22 @@
+{
+  "type": "FeatureCollection",
+  "name": "HangJeongDong_ver20260701",
+  "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84"}},
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"adm_nm": "서울특별시 가가구 가동", "adm_cd2": "1111000100", "sgg": "11110", "sido": "11", "sidonm": "서울특별시", "sggnm": "가가구", "adm_cd": "11010001"},
+      "geometry": {"type": "MultiPolygon", "coordinates": [[[[126.9, 37.5], [127.0, 37.5], [127.0, 37.6], [126.9, 37.6], [126.9, 37.5]]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"adm_nm": "서울특별시 나나구 나동", "adm_cd2": "1114000100", "sgg": "11140", "sido": "11", "sidonm": "서울특별시", "sggnm": "나나구", "adm_cd": "11020001"},
+      "geometry": {"type": "MultiPolygon", "coordinates": [[[[127.0, 37.5], [127.1, 37.5], [127.1, 37.6], [127.0, 37.6], [127.0, 37.5]]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"adm_nm": "부산광역시 다다구 다동", "adm_cd2": "2611000100", "sgg": "26110", "sido": "26", "sidonm": "부산광역시", "sggnm": "다다구", "adm_cd": "21010001"},
+      "geometry": {"type": "MultiPolygon", "coordinates": [[[[129.0, 35.1], [129.1, 35.1], [129.1, 35.2], [129.0, 35.2], [129.0, 35.1]]]]}
+    }
+  ]
+}

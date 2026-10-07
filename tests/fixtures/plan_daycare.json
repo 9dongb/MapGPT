@@ -1,0 +1,50 @@
+{
+  "intent": "supply_demand_gap",
+  "region": {"name": "서울특별시", "level": "sido"},
+  "analysis_unit": "emd",
+  "datasets": ["emd_boundary", "population_by_age", "daycare_facility"],
+  "filters": [
+    {
+      "dataset": "population_by_age",
+      "where": {"logic": "and", "conditions": [{"field": "age", "operator": "between", "value": [0, 5]}]}
+    }
+  ],
+  "operations": [
+    {
+      "type": "aggregate_by_area",
+      "label": "어린이집 수",
+      "input": "daycare_facility",
+      "boundary": "emd_boundary",
+      "aggregation": "count",
+      "output": "daycare_count"
+    },
+    {
+      "type": "aggregate",
+      "label": "0~5세 인구",
+      "input": "population_by_age",
+      "group_by": ["adm_cd"],
+      "aggregation": {"field": "population", "function": "sum"},
+      "output": "child_population"
+    },
+    {
+      "type": "calculate_ratio",
+      "label": "0~5세 어린이 1,000명당 어린이집 수",
+      "numerator": "daycare_count",
+      "denominator": "child_population",
+      "scale": 1000,
+      "output": "daycare_per_1000_children"
+    },
+    {
+      "type": "rank",
+      "label": "부족 순위",
+      "input": "daycare_per_1000_children",
+      "order": "asc",
+      "output": "shortage_rank"
+    }
+  ],
+  "output": {
+    "map_type": "choropleth",
+    "metric": "daycare_per_1000_children",
+    "ranking": {"enabled": true, "limit": 10}
+  }
+}
