@@ -5,6 +5,7 @@
 > "서울에서 어린이 인구 대비 어린이집이 부족한 행정동을 알려줘."
 > → 행정동별 `어린이집 수 ÷ 0~5세 인구 × 1,000`을 계산하고 값이 작은 순으로 순위를 매긴 Choropleth 지도
 
+- 설계 개요(팀 공유용): [docs/agent-design-overview.md](docs/agent-design-overview.md)
 - 설계: [docs/design/mvp-design.md](docs/design/mvp-design.md)
 - 요구사항 원문: [공간 분석 AI Agent 개발 전달 문서.md](공간%20분석%20AI%20Agent%20개발%20전달%20문서.md)
 
