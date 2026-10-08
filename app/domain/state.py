@@ -61,7 +61,8 @@ class AgentState(StrictModel):
     current_step: WorkflowStep | None = None
     interpreted_query: InterpretedQuery | None = None
     dataset_candidates: list[DatasetMetadata] = []
-    selected_datasets: list[str] = []
+    dataset_selection: DatasetSelection | None = None  # LLM 선택 원본 (근거 포함)
+    selected_datasets: list[str] = []  # 검사를 통과한 선택 (중복 제거)
     analysis_plan: AnalysisPlan | None = None
     plan_validation: ValidationReport | None = None
     plan_history: list[PlanAttempt] = []  # 재생성을 포함한 모든 계획 시도

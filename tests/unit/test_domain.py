@@ -10,7 +10,9 @@ from app.domain.operations import (
     CalculateRatioOperation,
     RankOperation,
 )
-from app.domain.plan import AnalysisPlan, DatasetFilter
+from app.catalog.definitions import SEOUL, TRUSTED_DATASETS
+from app.domain.enums import SpatialLevel
+from app.domain.plan import AnalysisPlan, DatasetFilter, Region, analysis_units
 from app.domain.state import DatasetSelection, Explanation, InterpretedQuery
 from app.llm.schema import to_llm_json_schema
 from tests.support import load_plan, load_plan_dict
@@ -154,3 +156,11 @@ def test_llm_schema_expresses_operations_as_any_of_with_enum_tags():
     variants = schema["properties"]["operations"]["items"]["anyOf"]
     tags = [schema["$defs"][v["$ref"].split("/")[-1]]["properties"]["type"]["enum"] for v in variants]
     assert tags == [["aggregate_by_area"], ["aggregate"], ["calculate_ratio"], ["rank"]]
+
+
+def test_analysis_units_come_from_polygon_datasets_covering_the_region():
+    datasets = TRUSTED_DATASETS.values()
+
+    assert analysis_units(datasets, SEOUL) == [SpatialLevel.EMD]
+    assert analysis_units(datasets, Region(name="서울특별시", level="sido")) == [SpatialLevel.EMD]
+    assert analysis_units(datasets, Region(name="부산광역시", level="sido")) == []

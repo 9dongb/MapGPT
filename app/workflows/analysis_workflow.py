@@ -17,8 +17,8 @@ from psycopg_pool import ConnectionPool
 from app.agents import steps
 from app.catalog.catalog import DatasetCatalog
 from app.domain.catalog import DatasetMetadata
-from app.domain.enums import RunStatus, Severity, WorkflowStep
-from app.domain.plan import AnalysisPlan, resolve_region
+from app.domain.enums import SPATIAL_LEVEL_NAMES, RunStatus, Severity, SpatialLevel, WorkflowStep
+from app.domain.plan import AnalysisPlan, analysis_units, resolve_region
 from app.domain.results import ValidationIssue, ValidationReport
 from app.domain.state import AgentState, InterpretedQuery, PlanAttempt, WorkflowError
 from app.executor.operation_executor import ExecutionContext, execute_operations, prepare_context
@@ -106,7 +106,8 @@ class AnalysisWorkflow:
     def _interpret_query(self, run: _Run) -> WorkflowStep:
         datasets = self._catalog.list_all()
         regions = list({d.spatial.coverage.name: d.spatial.coverage for d in datasets if d.spatial.coverage}.values())
-        interpreted = self._llm_call(steps.interpret_query, self._llm, run.state.question, regions)
+        coverage = [(region, analysis_units(datasets, region)) for region in regions]
+        interpreted = self._llm_call(steps.interpret_query, self._llm, run.state.question, coverage)
         run.state.interpreted_query = interpreted
         if interpreted.intent is None:
             raise WorkflowFailure(
@@ -119,6 +120,15 @@ class AnalysisWorkflow:
             raise WorkflowFailure(
                 "REGION_NOT_SUPPORTED", f"'{interpreted.region.name}' 데이터가 없습니다. 분석 가능한 지역: {supported}"
             )
+        # 경계 데이터가 없는 단위는 계획을 만들어도 검증에서 실패하므로 LLM을 더 부르기 전에 끝낸다.
+        units = analysis_units(datasets, interpreted.region)
+        if interpreted.analysis_unit not in units:
+            available = ", ".join(_unit_name(u) for u in units) or "없음"
+            raise WorkflowFailure(
+                "UNIT_NOT_SUPPORTED",
+                f"'{interpreted.region.name}'에는 {_unit_name(interpreted.analysis_unit)} 단위 경계 데이터가 없습니다. "
+                f"분석 가능한 단위: {available}",
+            )
         return WorkflowStep.SELECT_DATASETS
 
     def _select_datasets(self, run: _Run) -> WorkflowStep:
@@ -127,6 +137,7 @@ class AnalysisWorkflow:
         candidates = self._catalog.search(query)
         run.state.dataset_candidates = candidates
         selection = self._llm_call(steps.select_datasets, self._llm, interpreted, candidates)
+        run.state.dataset_selection = selection  # 검사 전에 기록해 잘못된 선택도 추적할 수 있게 한다
         candidate_ids = {d.dataset_id for d in candidates}
         unknown = [d for d in selection.datasets if d not in candidate_ids]
         if unknown or not selection.datasets:
@@ -244,6 +255,10 @@ class AnalysisWorkflow:
             run.conn.rollback()
             self._pool.putconn(run.conn)
             run.conn = None
+
+
+def _unit_name(level: SpatialLevel) -> str:
+    return f"{SPATIAL_LEVEL_NAMES[level]}({level})"
 
 
 def _consistency_issues(interpreted: InterpretedQuery, plan: AnalysisPlan) -> list[ValidationIssue]:

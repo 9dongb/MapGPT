@@ -11,6 +11,13 @@ class SpatialLevel(StrEnum):
     EMD = "emd"
 
 
+SPATIAL_LEVEL_NAMES: dict[SpatialLevel, str] = {
+    SpatialLevel.SIDO: "시도",
+    SpatialLevel.SIGUNGU: "시군구",
+    SpatialLevel.EMD: "행정동",
+}
+
+
 class GeometryType(StrEnum):
     POINT = "Point"
     POLYGON = "Polygon"

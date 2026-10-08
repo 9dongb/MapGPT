@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 from pydantic import Field
 
@@ -52,8 +52,14 @@ def unit_boundary_candidates(plan: AnalysisPlan, datasets: Mapping[str, DatasetM
     ]
 
 
-def resolve_region(region: Region, coverage: RegionRef | None) -> RegionRef | None:
+def resolve_region(region: Region | RegionRef, coverage: RegionRef | None) -> RegionRef | None:
     """MVP: 분석 지역은 Dataset coverage와 같아야 한다 (지역 계층 해석은 범위 밖)."""
     if coverage is not None and coverage.name == region.name and coverage.level == region.level:
         return coverage
     return None
+
+
+def analysis_units(datasets: Iterable[DatasetMetadata], region: Region | RegionRef) -> list[SpatialLevel]:
+    """region을 범위로 가진 Polygon 경계 Dataset이 있어 분석 단위로 쓸 수 있는 공간 단위."""
+    levels = {d.spatial.level for d in datasets if d.is_polygon and resolve_region(region, d.spatial.coverage)}
+    return [level for level in SpatialLevel if level in levels]

@@ -2,7 +2,7 @@ import pytest
 
 from app.domain.enums import RunStatus, WorkflowStep
 from app.domain.plan import AnalysisPlan
-from app.domain.state import InterpretedQuery
+from app.domain.state import DatasetSelection, InterpretedQuery
 from app.llm.base import LLMError, LLMOutputError
 from app.repositories.run_repository import get_run
 from app.workflows.analysis_workflow import AnalysisWorkflow
@@ -45,6 +45,7 @@ def test_first_use_case_runs_end_to_end_and_records_provenance(pool, catalog, co
     provenance = stored["provenance"]
     assert stored["status"] == "succeeded" and stored["result"]["result_id"] == response.result_id
     assert provenance["question"] == QUESTION
+    assert provenance["dataset_selection"]["rationale"] == "경계, 수요(0~5세 인구), 공급(어린이집)"
     assert provenance["analysis_plan"]["output"]["metric"] == "daycare_per_1000_children"
     row = conn.execute(
         "SELECT datasets, crs, jsonb_array_length(operations), result_id::text FROM analysis.run WHERE run_id = %s",
@@ -119,6 +120,7 @@ def test_plan_that_changes_the_interpretation_is_rejected(pool, catalog):
             "UNSUPPORTED_QUESTION",
         ),
         (interpreted(region="부산광역시"), "REGION_NOT_SUPPORTED"),
+        (interpreted(analysis_unit="sigungu"), "UNIT_NOT_SUPPORTED"),
         (LLMError("OpenAI 호출 실패: 401"), "LLM_FAILED"),
     ],
 )
@@ -131,6 +133,35 @@ def test_interpretation_failures_stop_before_planning(pool, catalog, conn, inter
     assert (state.errors[0].step, state.errors[0].code) == (WorkflowStep.INTERPRET_QUERY, code)
     assert llm.prompts_for(AnalysisPlan) == []
     assert get_run(conn, state.run_id)["status"] == "failed"
+
+
+def test_interpretation_prompt_lists_analysis_units_per_region(pool, catalog):
+    llm = daycare_llm()
+
+    AnalysisWorkflow(llm, pool).run(QUESTION)
+
+    system = next(system for output_type, system, _ in llm.calls if output_type is InterpretedQuery)
+    assert "- 서울특별시 (sido): emd(행정동)" in system
+
+
+def test_unit_without_boundary_data_fails_with_available_units(pool, catalog):
+    state = AnalysisWorkflow(daycare_llm(interpreted=[interpreted(analysis_unit="sigungu")]), pool).run(QUESTION)
+
+    assert state.errors[0].message == (
+        "'서울특별시'에는 시군구(sigungu) 단위 경계 데이터가 없습니다. 분석 가능한 단위: 행정동(emd)"
+    )
+
+
+def test_invalid_dataset_selection_is_recorded_before_stopping(pool, catalog, conn):
+    selection = DatasetSelection(datasets=["emd_boundary", "subway_station"], rationale="지하철역 거리를 계산")
+    llm = daycare_llm(selection=[selection])
+
+    state = AnalysisWorkflow(llm, pool).run(QUESTION)
+
+    assert (state.errors[0].step, state.errors[0].code) == (WorkflowStep.SELECT_DATASETS, "INVALID_DATASET_SELECTION")
+    assert llm.prompts_for(AnalysisPlan) == []
+    stored = get_run(conn, state.run_id)["provenance"]["dataset_selection"]
+    assert stored == {"datasets": ["emd_boundary", "subway_station"], "rationale": "지하철역 거리를 계산"}
 
 
 def test_result_validation_failure_blocks_map_and_explanation(pool, catalog, conn):

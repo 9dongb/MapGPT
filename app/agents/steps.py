@@ -4,14 +4,17 @@ from typing import Any
 
 from app.agents import prompts
 from app.domain.catalog import DatasetMetadata, RegionRef
+from app.domain.enums import SpatialLevel
 from app.domain.plan import AnalysisPlan
 from app.domain.results import ValidationIssue
 from app.domain.state import DatasetSelection, Explanation, InterpretedQuery
 from app.llm.base import StructuredLLM
 
 
-def interpret_query(llm: StructuredLLM, question: str, regions: list[RegionRef]) -> InterpretedQuery:
-    system, user = prompts.interpret_prompt(question, regions)
+def interpret_query(
+    llm: StructuredLLM, question: str, coverage: list[tuple[RegionRef, list[SpatialLevel]]]
+) -> InterpretedQuery:
+    system, user = prompts.interpret_prompt(question, coverage)
     return llm.generate(system=system, user=user, output_type=InterpretedQuery)
 
 

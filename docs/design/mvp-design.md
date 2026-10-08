@@ -429,7 +429,8 @@ class AgentState(BaseModel):
     current_step: WorkflowStep | None = None
     interpreted_query: InterpretedQuery | None = None
     dataset_candidates: list[DatasetMetadata] = []   # LLM이 본 메타데이터를 그대로 기록
-    selected_datasets: list[str] = []
+    dataset_selection: DatasetSelection | None = None # LLM 선택 원본 (근거 포함, 검사 전에 기록)
+    selected_datasets: list[str] = []                 # 검사를 통과한 선택 (중복 제거)
     analysis_plan: AnalysisPlan | None = None
     plan_history: list[PlanAttempt] = []   # 재생성을 포함한 모든 계획 시도 (plan + 검증 결과)
     plan_validation: ValidationReport | None = None
@@ -551,7 +552,7 @@ def execute_operations(ctx) -> ExecutionResult                  # 순서대로 h
 ```text
 UI ─POST /api/analyses {question}─▶ API ─▶ AnalysisWorkflow.run(question)
  1 interpret_query      LLM(InterpretedQuery)  ← 질문 + 지원 intent/단위 + 카탈로그 coverage + 분석 정책
-                        intent=None이면 UNSUPPORTED_QUESTION으로 종료
+                        intent=None이면 UNSUPPORTED_QUESTION, 데이터 없는 지역·단위면 REGION/UNIT_NOT_SUPPORTED로 종료
  2 select_datasets      catalog.search(key_concepts) → 후보 3개 → LLM(DatasetSelection) → 후보 내 ID인지 확인
  3 build_analysis_plan  LLM(AnalysisPlan)      ← 해석 + 선택 Dataset 메타데이터(컬럼/join key/공간/시간) + 정책
  4 validate_plan        PlanValidator → 오류면 3으로 1회 복귀(피드백), 재실패 시 PLAN_INVALID
@@ -748,4 +749,6 @@ Validation(5)을 LLM 연동(6)보다 먼저 한다. LLM 출력은 처음부터 �
 | Provenance | `plan_attempts`(횟수) 대신 `plan_history`(시도별 Plan·검증 결과) | 재생성 전후의 판단을 모두 추적 |
 | Ollama | `OLLAMA_REASONING_EFFORT`(선택) → `reasoning_effort` | thinking 모델(qwen3.5:9b) 해석 단계가 130초→6초로 단축되어 로컬 E2E가 실용적이 됨 |
 | 플래너·해석 프롬프트 | 요구되지 않은 필터(기준일·유형 전체 나열) 금지, 정책 정의를 가정으로 반복하지 않기 | 실제 LLM 실행에서 관찰된 과잉 조건·중복 가정 |
+| 분석 단위 조기 확인 | 해석 프롬프트에 지역별 분석 가능한 단위를 표시하고 "사용자가 말한 단위를 바꾸지 않는다" 규칙 추가, 해석 직후 경계 데이터가 없는 단위는 `UNIT_NOT_SUPPORTED`로 종료 | 시군구 질문이 LLM 4회 이상 호출 뒤 `PLAN_INVALID`로 끝나던 것을 1회 호출로 줄임. 가능한 단위만 보여주면 모델이 '구별'을 행정동으로 바꿔버릴 수 있어 단위 목록은 유지 |
+| 데이터 선택 근거 기록 | `AgentState.dataset_selection`에 LLM 선택 원본(근거 포함)을 검사 전에 저장 | 선택 근거가 버려져 Agent 판단을 추적할 수 없었음. 잘못된 선택으로 실패한 경우도 기록 |
 
