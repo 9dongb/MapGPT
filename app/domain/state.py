@@ -27,6 +27,19 @@ class InterpretedQuery(StrictModel):
     assumptions: list[str] = Field(description="해석 과정에서 둔 가정")
 
 
+class DatasetHit(StrictModel):
+    dataset_id: str
+    similarity: float
+
+
+class DatasetSearch(StrictModel):
+    """Dataset 후보 검색 기록 (pgvector 코사인 유사도)."""
+
+    query: str
+    embedding_model: str
+    hits: list[DatasetHit]
+
+
 class DatasetSelection(StrictModel):
     """후보 Dataset 중 분석에 필요한 Dataset 선택 결과."""
 
@@ -60,6 +73,7 @@ class AgentState(StrictModel):
     status: RunStatus = RunStatus.RUNNING
     current_step: WorkflowStep | None = None
     interpreted_query: InterpretedQuery | None = None
+    dataset_search: DatasetSearch | None = None
     dataset_candidates: list[DatasetMetadata] = []
     dataset_selection: DatasetSelection | None = None  # LLM 선택 원본 (근거 포함)
     selected_datasets: list[str] = []  # 검사를 통과한 선택 (중복 제거)

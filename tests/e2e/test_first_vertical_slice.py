@@ -1,6 +1,7 @@
 """첫 번째 Vertical Slice 성공 기준(전달 문서 40번) E2E.
 
-실제 적재 데이터(DATABASE_URL)와 실제 LLM(LLM_PROVIDER 설정)이 필요하다: pytest -m e2e
+실제 적재 데이터(DATABASE_URL)·카탈로그 임베딩(embed-catalog), 실제 LLM(LLM_PROVIDER 설정)과
+OpenAI 임베딩(OPENAI_API_KEY)이 필요하다: pytest -m e2e
 """
 
 import math
@@ -12,7 +13,8 @@ from psycopg_pool import ConnectionPool
 from app.config import get_settings
 from app.domain.enums import RunStatus
 from app.llm.base import LLMError
-from app.llm.factory import create_llm
+from app.llm.embeddings import EmbeddingError
+from app.llm.factory import create_embedder, create_llm
 from app.repositories.run_repository import get_run
 from app.workflows.analysis_workflow import AnalysisWorkflow
 from tests.support import QUESTION
@@ -26,9 +28,9 @@ EXPECTED_DATASETS = {"emd_boundary", "population_by_age", "daycare_facility"}
 def environment():
     settings = get_settings()
     try:
-        llm = create_llm(settings)
-    except LLMError as error:
-        pytest.skip(f"LLM이 설정되지 않았습니다: {error}")
+        llm, embedder = create_llm(settings), create_embedder(settings)
+    except (LLMError, EmbeddingError) as error:
+        pytest.skip(f"LLM 또는 임베딩이 설정되지 않았습니다: {error}")
     try:
         with psycopg.connect(settings.database_url) as conn:
             loaded = conn.execute("SELECT count(*) FROM catalog.dataset").fetchone()[0]
@@ -37,7 +39,7 @@ def environment():
     if loaded < len(EXPECTED_DATASETS):
         pytest.skip("실데이터가 적재되지 않았습니다 (python -m app.cli ingest all)")
     with ConnectionPool(settings.database_url, min_size=1, max_size=2) as pool:
-        state = AnalysisWorkflow(llm, pool).run(QUESTION)
+        state = AnalysisWorkflow(llm, pool, embedder).run(QUESTION)
         yield state, pool
 
 
@@ -52,6 +54,7 @@ def test_success_criteria_1_to_5_interpretation_selection_and_plan(environment):
         "sido",
         "emd",
     )
+    assert EXPECTED_DATASETS <= {hit.dataset_id for hit in state.dataset_search.hits}  # 2. pgvector 후보 검색
     assert set(state.selected_datasets) == EXPECTED_DATASETS  # 2. Dataset 선택
     assert state.analysis_plan is not None  # 3·4. Pydantic 검증을 통과한 Plan
     assert state.plan_validation.ok  # 5. Plan Validator 통과

@@ -1,5 +1,6 @@
 -- MapGPT MVP 스키마 (반복 실행 가능)
 CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE SCHEMA IF NOT EXISTS catalog;
 CREATE SCHEMA IF NOT EXISTS datasets;
@@ -11,6 +12,17 @@ CREATE TABLE IF NOT EXISTS catalog.dataset (
     metadata   jsonb NOT NULL,
     loaded_at  timestamptz NOT NULL
 );
+
+-- Dataset 후보 검색용 임베딩 (pgvector). Dataset당 1개, 차원은 app/llm/embeddings.py와 같아야 한다.
+CREATE TABLE IF NOT EXISTS catalog.dataset_embedding (
+    dataset_id  text PRIMARY KEY REFERENCES catalog.dataset (dataset_id) ON DELETE CASCADE,
+    model       text NOT NULL,
+    source_text text NOT NULL,  -- 임베딩한 문서: 현재 메타데이터로 만든 문서와 다르면 오래된 임베딩
+    embedding   vector(1536) NOT NULL,
+    embedded_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS dataset_embedding_hnsw_idx
+    ON catalog.dataset_embedding USING hnsw (embedding vector_cosine_ops);
 
 -- 내부 표준 Dataset: 행정동 경계
 CREATE TABLE IF NOT EXISTS datasets.emd_boundary (

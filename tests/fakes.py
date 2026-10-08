@@ -1,8 +1,13 @@
+import math
+import re
+import zlib
+
 from pydantic import BaseModel
 
 from app.catalog.definitions import SEOUL
 from app.domain.plan import AnalysisPlan, Region
 from app.domain.state import DatasetSelection, Explanation, InterpretedQuery
+from app.llm.embeddings import EMBEDDING_DIMENSIONS
 from tests.support import load_plan
 
 
@@ -26,6 +31,26 @@ class FakeLLM:
 
     def prompts_for(self, output_type: type[BaseModel]) -> list[str]:
         return [user for called_type, _, user in self.calls if called_type is output_type]
+
+
+class FakeEmbedder:
+    """단어 해싱으로 만든 결정론적 임베딩. 같은 단어를 많이 공유할수록 코사인 유사도가 높다."""
+
+    def __init__(self, model: str = "fake-embedding"):
+        self.model = model
+        self.calls: list[list[str]] = []
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(list(texts))
+        return [_hashed_vector(text) for text in texts]
+
+
+def _hashed_vector(text: str) -> list[float]:
+    vector = [0.0] * EMBEDDING_DIMENSIONS
+    for token in re.findall(r"\w+", text.lower()):
+        vector[zlib.crc32(token.encode()) % EMBEDDING_DIMENSIONS] += 1.0
+    norm = math.sqrt(sum(value * value for value in vector)) or 1.0
+    return [value / norm for value in vector]
 
 
 def interpreted(region: str = SEOUL.name, **overrides) -> InterpretedQuery:

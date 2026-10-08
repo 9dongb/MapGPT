@@ -15,15 +15,16 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from app.agents import steps
-from app.catalog.catalog import DatasetCatalog
+from app.catalog.catalog import CatalogIndexError, DatasetCatalog
 from app.domain.catalog import DatasetMetadata
 from app.domain.enums import SPATIAL_LEVEL_NAMES, RunStatus, Severity, SpatialLevel, WorkflowStep
 from app.domain.plan import AnalysisPlan, analysis_units, resolve_region
 from app.domain.results import ValidationIssue, ValidationReport
-from app.domain.state import AgentState, InterpretedQuery, PlanAttempt, WorkflowError
+from app.domain.state import AgentState, DatasetHit, DatasetSearch, InterpretedQuery, PlanAttempt, WorkflowError
 from app.executor.operation_executor import ExecutionContext, execute_operations, prepare_context
 from app.gis.tools import GisToolError, create_choropleth_layer
 from app.llm.base import LLMError, LLMOutputError, StructuredLLM
+from app.llm.embeddings import Embedder, EmbeddingError
 from app.repositories.run_repository import save_run
 from app.validation.plan_validator import validate_plan
 from app.validation.result_validator import validate_result
@@ -50,10 +51,10 @@ class _Run:
 
 
 class AnalysisWorkflow:
-    def __init__(self, llm: StructuredLLM, pool: ConnectionPool):
+    def __init__(self, llm: StructuredLLM, pool: ConnectionPool, embedder: Embedder):
         self._llm = llm
         self._pool = pool
-        self._catalog = DatasetCatalog(pool)
+        self._catalog = DatasetCatalog(pool, embedder)
         self._steps: dict[WorkflowStep, Callable[[_Run], WorkflowStep | None]] = {
             WorkflowStep.INTERPRET_QUERY: self._interpret_query,
             WorkflowStep.SELECT_DATASETS: self._select_datasets,
@@ -134,7 +135,18 @@ class AnalysisWorkflow:
     def _select_datasets(self, run: _Run) -> WorkflowStep:
         interpreted = run.state.interpreted_query
         query = " ".join([interpreted.restated_question, *interpreted.key_concepts])
-        candidates = self._catalog.search(query)
+        try:
+            hits = self._catalog.search(query)
+        except CatalogIndexError as error:
+            raise WorkflowFailure("CATALOG_INDEX_STALE", str(error)) from error
+        except EmbeddingError as error:
+            raise WorkflowFailure("EMBEDDING_FAILED", str(error)) from error
+        run.state.dataset_search = DatasetSearch(
+            query=query,
+            embedding_model=self._catalog.embedding_model,
+            hits=[DatasetHit(dataset_id=hit.metadata.dataset_id, similarity=round(hit.similarity, 4)) for hit in hits],
+        )
+        candidates = [hit.metadata for hit in hits]
         run.state.dataset_candidates = candidates
         selection = self._llm_call(steps.select_datasets, self._llm, interpreted, candidates)
         run.state.dataset_selection = selection  # 검사 전에 기록해 잘못된 선택도 추적할 수 있게 한다

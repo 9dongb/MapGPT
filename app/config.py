@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     llm_provider: Literal["openai", "ollama"] = "openai"
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-6.1-sol"
+    # Dataset 후보 검색(pgvector) 임베딩. LLM_PROVIDER와 관계없이 OpenAI를 쓴다.
+    openai_embedding_model: str = "text-embedding-3-small"
     ollama_base_url: str = "http://localhost:11434/v1"
     ollama_model: str | None = None
     # thinking 모델의 추론 강도 (예: none이면 끔). 비우면 모델 기본값을 쓴다.

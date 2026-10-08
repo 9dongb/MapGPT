@@ -3,8 +3,10 @@ from datetime import date
 import pytest
 from psycopg_pool import ConnectionPool
 
+from app.catalog.catalog import sync_catalog_embeddings
 from app.catalog.definitions import TRUSTED_DATASETS
 from app.repositories.catalog_repository import upsert_dataset
+from tests.fakes import FakeEmbedder
 from tests.integration.synthetic import SEOUL_BBOX, UNITS, load_synthetic
 
 REFERENCE_DATES = {
@@ -22,7 +24,7 @@ def pool(database_url):
 
 @pytest.fixture
 def catalog(conn):
-    """합성 데이터와, 적재 시 계산되는 통계(기준일·bbox·feature 수)를 채운 카탈로그를 등록한다."""
+    """합성 데이터와, 적재 시 계산되는 통계(기준일·bbox·feature 수)를 채운 카탈로그·검색 임베딩을 등록한다."""
     load_synthetic(conn)
     seoul_units = sum(1 for unit in UNITS if unit[2] == "11")
     for metadata in TRUSTED_DATASETS.values():
@@ -33,3 +35,4 @@ def catalog(conn):
             metadata = metadata.model_copy(update={"spatial": spatial})
         upsert_dataset(conn, metadata)
     conn.commit()
+    sync_catalog_embeddings(conn, FakeEmbedder())

@@ -10,6 +10,7 @@ TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "postgresql://mapgpt:map
 _TABLES = (
     "analysis.result",
     "analysis.run",
+    "catalog.dataset_embedding",
     "catalog.dataset",
     "datasets.emd_boundary",
     "datasets.population_by_age",

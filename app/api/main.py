@@ -10,11 +10,12 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
 from app.api.schemas import AnalysisRequest, AnalysisResponse
-from app.catalog.catalog import DatasetCatalog
 from app.config import Settings, get_settings
 from app.domain.catalog import DatasetMetadata
 from app.llm.base import LLMError, StructuredLLM
-from app.llm.factory import create_llm
+from app.llm.embeddings import Embedder, EmbeddingError
+from app.llm.factory import create_embedder, create_llm
+from app.repositories.catalog_repository import list_datasets
 from app.repositories.run_repository import get_run
 from app.workflows.analysis_workflow import AnalysisWorkflow
 
@@ -30,8 +31,16 @@ def get_llm(request: Request) -> StructuredLLM:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
 
+def get_embedder(request: Request) -> Embedder:
+    try:
+        return create_embedder(request.app.state.settings)
+    except EmbeddingError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
 Pool = Annotated[ConnectionPool, Depends(get_pool)]
 LLM = Annotated[StructuredLLM, Depends(get_llm)]
+Embedding = Annotated[Embedder, Depends(get_embedder)]
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -47,9 +56,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
 
     @app.post("/api/analyses", response_model=AnalysisResponse)
-    def create_analysis(body: AnalysisRequest, pool: Pool, llm: LLM) -> AnalysisResponse:
+    def create_analysis(body: AnalysisRequest, pool: Pool, llm: LLM, embedder: Embedding) -> AnalysisResponse:
         """질문을 분석 워크플로로 실행한다. 분석 실패도 run으로 기록되며 status=failed로 반환한다."""
-        state = AnalysisWorkflow(llm, pool).run(body.question)
+        state = AnalysisWorkflow(llm, pool, embedder).run(body.question)
         return AnalysisResponse(
             run_id=state.run_id, status=state.status, result=state.final_response, errors=state.errors
         )
@@ -63,8 +72,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return run
 
     @app.get("/api/datasets", response_model=list[DatasetMetadata])
-    def list_datasets(pool: Pool) -> list[DatasetMetadata]:
-        return DatasetCatalog(pool).list_all()
+    def read_datasets(pool: Pool) -> list[DatasetMetadata]:
+        with pool.connection() as conn:
+            return list_datasets(conn)
 
     @app.get("/api/health")
     def health(pool: Pool) -> dict[str, str]:
@@ -80,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "database": database,
             "llm_provider": settings.llm_provider,
             "llm_model": model or "",
+            "embedding_model": settings.openai_embedding_model,
         }
 
     return app

@@ -18,7 +18,7 @@ LLM은 질문 해석 · Dataset 선택 · Analysis Plan 생성 · 결과 설명�
 conda activate mapgpt
 pip install -e ".[dev]"
 cp .env.example .env   # 키를 채웁니다
-docker compose up -d   # PostGIS
+docker compose up -d --build   # PostGIS + pgvector (docker/postgres 이미지 빌드)
 python -m app.cli init-db
 ```
 
@@ -28,6 +28,7 @@ python -m app.cli init-db
 |---|---|
 | `LLM_PROVIDER` | `openai` 또는 `ollama` |
 | `OPENAI_API_KEY`, `OPENAI_MODEL` | OpenAI Responses API (기본 `gpt-6.1-sol`) |
+| `OPENAI_EMBEDDING_MODEL` | Dataset 후보 검색 임베딩 (기본 `text-embedding-3-small`). `LLM_PROVIDER=ollama`여도 `OPENAI_API_KEY`가 필요합니다 |
 | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | 로컬 Ollama (예: `ollama pull qwen3.5:9b` 후 `OLLAMA_MODEL=qwen3.5:9b`) |
 | `OLLAMA_REASONING_EFFORT` | thinking 모델의 추론 강도. `none`이면 thinking을 끕니다 (qwen3.5:9b 해석 단계 130초 → 6초) |
 | `SEOUL_OPEN_API_KEY` | 서울 열린데이터광장 인증키 (어린이집 `ChildCareInfo` API) |
@@ -37,6 +38,12 @@ python -m app.cli init-db
 ```bash
 python -m app.cli download        # 행정동 경계(GeoJSON)·인구(CSV) → data/raw/
 python -m app.cli ingest all      # 경계 → 인구 → 어린이집 순서로 서울 데이터만 정규화·적재
+```
+
+적재가 끝나면 Dataset 메타데이터(제목·설명·태그·컬럼 설명)를 OpenAI로 임베딩해 `catalog.dataset_embedding`(pgvector)에 저장합니다. 분석할 때는 해석된 질문을 임베딩해 코사인 유사도가 높은 Dataset 10개를 후보로 찾고, LLM이 그중 필요한 것을 고릅니다. 임베딩이 없거나 메타데이터보다 오래되면 분석이 `CATALOG_INDEX_STALE`로 멈추므로 다시 임베딩합니다.
+
+```bash
+python -m app.cli embed-catalog             # 바뀐 Dataset만 다시 임베딩 (--refresh: 전부)
 ```
 
 어린이집은 API로 수집한 원본을 `data/raw/seoul_childcare_YYYYMMDD.json`에 캐시합니다(`--refresh`로 다시 수집). 적재할 때 운영 중(운영현황 '정상'·'재개')인 시설만 남기고, 좌표 품질 규칙(좌표 없음, 다른 자치구 시설과 같은 기본값 좌표, 신고 자치구 밖 좌표)에 걸린 시설을 제외한 뒤 제외 건수를 카탈로그에 기록합니다.
@@ -66,7 +73,7 @@ pytest              # unit + integration (integration은 docker compose의 PostG
 ```
 
 ```bash
-pytest -m e2e       # 실제 적재 데이터 + 실제 LLM으로 성공 기준 1~12 확인
+pytest -m e2e       # 실제 적재 데이터 + 실제 LLM·OpenAI 임베딩으로 성공 기준 1~12 확인
 ```
 
 ## 데이터 출처와 라이선스

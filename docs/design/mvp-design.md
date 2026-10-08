@@ -65,7 +65,7 @@
 | `domain` | Core Contract(Pydantic 모델, Enum, 분석 정책). 외부 I/O가 없다. | (없음) |
 | `llm` | 공급자별 Structured Output 호출. 공급자 차이를 숨긴다. | domain |
 | `agents` | 프롬프트 구성, LLM 4단계(해석·선택·계획·설명) | domain, llm |
-| `catalog` | Dataset 메타데이터 조회·검색 (향후 pgvector로 교체할 지점) | domain, repositories |
+| `catalog` | Dataset 메타데이터 조회, 임베딩 동기화, pgvector 유사도 후보 검색 | domain, llm(임베딩), repositories |
 | `validation` | Plan/Result 결정론적 검증 | domain |
 | `gis` | GIS Tool, CRS 정책, Filter → SQL 컴파일 | domain |
 | `executor` | Operation → GIS Tool 매핑 실행 | domain, gis |
@@ -101,7 +101,7 @@ MapGPT/
 │   │   └── policies.py         # 분석 정책 (supply_demand_gap: ×1000, 오름차순)
 │   ├── catalog/
 │   │   ├── definitions.py      # Trusted Dataset 3종의 정적 메타데이터
-│   │   └── catalog.py          # DatasetCatalog.search / get
+│   │   └── catalog.py          # 임베딩 문서·동기화, DatasetCatalog.search (pgvector)
 │   ├── data_sources/
 │   │   ├── adapters/           # admdongkor.py / mois_population.py / seoul_childcare.py
 │   │   └── ingest.py           # 정규화 → 품질 규칙 → 적재 → 카탈로그 갱신
@@ -119,7 +119,8 @@ MapGPT/
 │   │   ├── schema.py           # Pydantic → 공급자 호환 JSON Schema
 │   │   ├── openai_llm.py       # OpenAI Responses API
 │   │   ├── ollama_llm.py       # Ollama (OpenAI 호환 Chat Completions)
-│   │   └── factory.py          # LLM_PROVIDER로 선택
+│   │   ├── embeddings.py       # Embedder 포트, OpenAI 임베딩 (1536차원)
+│   │   └── factory.py          # LLM_PROVIDER로 선택, 임베딩은 항상 OpenAI
 │   ├── agents/
 │   │   ├── prompts.py
 │   │   └── steps.py            # interpret / select / plan / explain
@@ -409,6 +410,11 @@ class InterpretedQuery(StrictModel):        # LLM 출력
     key_concepts: list[str]                  # 카탈로그 검색어 (예: 어린이집, 0~5세 인구)
     assumptions: list[str]                   # 해석 과정의 가정
 
+class DatasetSearch(StrictModel):           # pgvector 후보 검색 기록
+    query: str                               # restated_question + key_concepts
+    embedding_model: str
+    hits: list[DatasetHit]                   # dataset_id, similarity(코사인), 유사도 내림차순
+
 class DatasetSelection(StrictModel):        # LLM 출력
     datasets: list[str]
     rationale: str
@@ -428,6 +434,7 @@ class AgentState(BaseModel):
     status: RunStatus                        # running | succeeded | failed
     current_step: WorkflowStep | None = None
     interpreted_query: InterpretedQuery | None = None
+    dataset_search: DatasetSearch | None = None      # 검색어·임베딩 모델·후보별 유사도
     dataset_candidates: list[DatasetMetadata] = []   # LLM이 본 메타데이터를 그대로 기록
     dataset_selection: DatasetSelection | None = None # LLM 선택 원본 (근거 포함, 검사 전에 기록)
     selected_datasets: list[str] = []                 # 검사를 통과한 선택 (중복 제거)
@@ -553,7 +560,8 @@ def execute_operations(ctx) -> ExecutionResult                  # 순서대로 h
 UI ─POST /api/analyses {question}─▶ API ─▶ AnalysisWorkflow.run(question)
  1 interpret_query      LLM(InterpretedQuery)  ← 질문 + 지원 intent/단위 + 카탈로그 coverage + 분석 정책
                         intent=None이면 UNSUPPORTED_QUESTION, 데이터 없는 지역·단위면 REGION/UNIT_NOT_SUPPORTED로 종료
- 2 select_datasets      catalog.search(key_concepts) → 후보 3개 → LLM(DatasetSelection) → 후보 내 ID인지 확인
+ 2 select_datasets      재진술+key_concepts 임베딩 → pgvector 코사인 상위 10개 후보 → LLM(DatasetSelection)
+                        → 후보 내 ID인지 확인. 임베딩이 없거나 오래되면 CATALOG_INDEX_STALE로 종료
  3 build_analysis_plan  LLM(AnalysisPlan)      ← 해석 + 선택 Dataset 메타데이터(컬럼/join key/공간/시간) + 정책
  4 validate_plan        PlanValidator → 오류면 3으로 1회 복귀(피드백), 재실패 시 PLAN_INVALID
  5 load_data            get_boundary(emd_boundary, 서울특별시) / get_dataset(population_by_age)
@@ -581,14 +589,25 @@ UI ─POST /api/analyses {question}─▶ API ─▶ AnalysisWorkflow.run(questi
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS vector;      -- pgvector (docker/postgres 이미지)
 CREATE SCHEMA catalog;  CREATE SCHEMA datasets;  CREATE SCHEMA analysis;
 
--- Dataset Catalog (향후 pgvector embedding 컬럼을 추가할 위치)
+-- Dataset Catalog
 CREATE TABLE catalog.dataset (
   dataset_id text PRIMARY KEY,
   metadata   jsonb NOT NULL,              -- DatasetMetadata 전체 (적재 통계·품질 기록 포함)
   loaded_at  timestamptz NOT NULL
 );
+
+-- Dataset 후보 검색 임베딩 (Dataset당 1개)
+CREATE TABLE catalog.dataset_embedding (
+  dataset_id  text PRIMARY KEY REFERENCES catalog.dataset ON DELETE CASCADE,
+  model       text NOT NULL,              -- 예: text-embedding-3-small
+  source_text text NOT NULL,              -- 임베딩한 문서. 현재 메타데이터로 만든 문서와 다르면 오래된 임베딩
+  embedding   vector(1536) NOT NULL,
+  embedded_at timestamptz NOT NULL
+);
+CREATE INDEX ON catalog.dataset_embedding USING hnsw (embedding vector_cosine_ops);
 
 -- 내부 표준 Dataset
 CREATE TABLE datasets.emd_boundary (
@@ -631,7 +650,9 @@ CREATE TABLE analysis.result (
 
 ### 13.2 적재 (`python -m app.cli ingest all`)
 
-순서: `emd_boundary` → `population_by_age` → `daycare_facility`(경계를 품질 규칙에 쓰므로 마지막에 적재). Dataset마다 한 트랜잭션에서 테이블을 교체한다. 그 뒤 `bbox`·`feature_count`·`reference_date`·`quality_notes`를 계산해 `catalog.dataset`을 upsert한다.
+순서: `emd_boundary` → `population_by_age` → `daycare_facility`(경계를 품질 규칙에 쓰므로 마지막에 적재). Dataset마다 한 트랜잭션에서 테이블을 교체한다. 그 뒤 `bbox`·`feature_count`·`reference_date`·`quality_notes`를 계산해 `catalog.dataset`을 upsert한다. 마지막으로 임베딩 문서가 바뀐 Dataset만 다시 임베딩한다(`python -m app.cli embed-catalog`와 같음).
+
+임베딩 문서(전달 문서 34번)는 제목·설명·분류·태그·지역과 컬럼별 `이름: 설명 (semantic_type)`이다. 적재 통계(feature 수, bbox, 기준일)는 넣지 않으므로 다시 적재해도 임베딩은 바뀌지 않는다. 공간 데이터 자체(Polygon·Point)는 임베딩하지 않는다.
 
 - `emd_boundary`: `sido == "11"`만 남긴다. `adm_cd2` → `adm_cd`, `adm_nm`은 마지막 토큰(동명), `ST_Multi(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON(...), 4326)))`.
 - `population_by_age`: cp949로 읽고 서울(`11*`)만 남긴다. 연령별 남+여를 long 형식 `(adm_cd, age, population)`으로 변환한다(110세 이상 → 110). `기준연월` → `reference_date`. 정합성(계 = 연령 합) 검사.
@@ -655,7 +676,7 @@ CREATE TABLE analysis.result (
 | `POST` | `/api/analyses` | `{"question": str}` → 워크플로를 동기 실행한다. `200 {run_id, status, result: FinalResponse \| null, errors: WorkflowError[]}`. 분석 실패(지원 범위 밖, Plan 무효 등)도 run이 기록되므로 200 + `status="failed"`다. 요청 형식 오류는 422, 서버 장애는 500이다. |
 | `GET` | `/api/analyses/{run_id}` | Provenance(상태 전체)와 결과를 조회한다. 없으면 404. |
 | `GET` | `/api/datasets` | 카탈로그 메타데이터 목록 |
-| `GET` | `/api/health` | DB 연결, LLM provider/model |
+| `GET` | `/api/health` | DB 연결, LLM provider/model, 임베딩 모델 |
 
 **FinalResponse (전달 문서 22번)**
 
@@ -681,10 +702,10 @@ class FinalResponse(StrictModel):
 | 계층 | 범위 | 환경 |
 |---|---|---|
 | **Unit** | 도메인 스키마(유효/무효 Plan, Filter value 형태, union 판별, 미지원 type 거부), LLM JSON Schema 변환(oneOf·dict·기본값 없음, 전 필드 required, additionalProperties=false), Filter SQL 컴파일(연산자별 SQL·파라미터, 주입 시도 값이 파라미터로만 전달), Plan Validator(규칙별 음성 케이스 + 정상 Plan), ratio/rank(0·결측 분모, 동순위, null), Result Validator 규칙, Adapter(소형 fixture 파일 파싱), LLM 어댑터 요청 형식(HTTP mock), Executor handler가 Union 전 멤버를 커버하는지 | DB·네트워크 없음 |
-| **Integration** | GIS Tool을 합성 데이터로 검증한다: 정사각형 2개 경계, 내부/외부/공유 경계선 위 점, **EPSG:5179로 저장한 점의 CRS 정규화**, 0 분모·결측 단위 인구. 정확한 count·ratio·rank, Choropleth GeoJSON 유효성, 적재 파이프라인(fixture → 테이블 → 카탈로그), Workflow 전체를 FakeLLM으로 실행해 FinalResponse·Provenance 저장 확인, API(TestClient) | Docker PostGIS의 `mapgpt_test` DB. 연결이 불가하면 사유와 함께 skip |
+| **Integration** | GIS Tool을 합성 데이터로 검증한다: 정사각형 2개 경계, 내부/외부/공유 경계선 위 점, **EPSG:5179로 저장한 점의 CRS 정규화**, 0 분모·결측 단위 인구. 정확한 count·ratio·rank, Choropleth GeoJSON 유효성, 적재 파이프라인(fixture → 테이블 → 카탈로그), Workflow 전체를 FakeLLM으로 실행해 FinalResponse·Provenance 저장 확인, API(TestClient), FakeEmbedder(단어 해싱)로 pgvector 순위·임베딩 동기화·오래된 임베딩 거부 | Docker PostGIS의 `mapgpt_test` DB. 연결이 불가하면 사유와 함께 skip |
 | **E2E** (opt-in `-m e2e`) | 실제 적재 데이터 + 실제 LLM(OpenAI 또는 Ollama)으로 대표 질문을 실행해 40번 성공 기준 1~12를 단언한다 | API 키 또는 Ollama 모델 필요 |
 
-LLM 응답은 비결정적이므로 Unit/Integration에서는 FakeLLM(사전에 정한 구조화 출력)을 쓴다. "LLM이 올바르게 해석·선택·계획하는가"는 E2E에서 확인한다.
+LLM 응답은 비결정적이므로 Unit/Integration에서는 FakeLLM(사전에 정한 구조화 출력)과 FakeEmbedder를 쓴다. "LLM이 올바르게 해석·선택·계획하는가"는 E2E에서 확인한다.
 
 ---
 
@@ -724,10 +745,11 @@ Validation(5)을 LLM 연동(6)보다 먼저 한다. LLM 출력은 처음부터 �
 - `OllamaChatLLM`: OpenAI SDK의 `base_url`을 Ollama `/v1`로 지정하고 Chat Completions `response_format=json_schema`, `temperature=0`을 쓴다. Ollama 권장사항에 따라 스키마를 프롬프트에도 포함한다.
 - 공통: `llm/schema.py`가 만든 호환 스키마를 보내고, 응답은 `model_validate_json`으로 다시 검증한다. 거절·잘림(refusal, length)·JSON 오류는 `LLMError`로 명시적으로 처리한다.
 - 전환: `.env`의 `LLM_PROVIDER=openai|ollama`.
+- 임베딩: `Embedder.embed(texts) -> list[list[float]]` 포트, `OpenAIEmbedder`(`OPENAI_EMBEDDING_MODEL`, 기본 `text-embedding-3-small`, `dimensions=1536`). `LLM_PROVIDER`와 관계없이 OpenAI를 쓴다.
 
 ## 부록 C. 이번 범위에서 하지 않는 것
 
-전달 문서 30번 목록을 그대로 따른다(pgvector, Vector DB, Dynamic Discovery, Multi-Agent, MCP, OGC API, Sedona, Raster, Routing, Isochrone, 입지 최적화, Knowledge Graph, 임의 코드/SQL 실행, Plugin System). 그 밖에 다음도 하지 않는다: 비동기 Job 큐, 마이그레이션 도구(Alembic), 인증, Vector Tile, 지역 계층(시군구 단위 질의) 해석.
+전달 문서 30번 목록을 따른다(Vector DB, Dynamic Discovery, Multi-Agent, MCP, OGC API, Sedona, Raster, Routing, Isochrone, 입지 최적화, Knowledge Graph, 임의 코드/SQL 실행, Plugin System). 단, pgvector Dataset 후보 검색은 사용자 요청으로 구현했다(부록 D). 그 밖에 다음도 하지 않는다: 비동기 Job 큐, 마이그레이션 도구(Alembic), 인증, Vector Tile, 지역 계층(시군구 단위 질의) 해석.
 
 ## 부록 D. 구현 중 변경·보완 사항
 
@@ -751,4 +773,4 @@ Validation(5)을 LLM 연동(6)보다 먼저 한다. LLM 출력은 처음부터 �
 | 플래너·해석 프롬프트 | 요구되지 않은 필터(기준일·유형 전체 나열) 금지, 정책 정의를 가정으로 반복하지 않기 | 실제 LLM 실행에서 관찰된 과잉 조건·중복 가정 |
 | 분석 단위 조기 확인 | 해석 프롬프트에 지역별 분석 가능한 단위를 표시하고 "사용자가 말한 단위를 바꾸지 않는다" 규칙 추가, 해석 직후 경계 데이터가 없는 단위는 `UNIT_NOT_SUPPORTED`로 종료 | 시군구 질문이 LLM 4회 이상 호출 뒤 `PLAN_INVALID`로 끝나던 것을 1회 호출로 줄임. 가능한 단위만 보여주면 모델이 '구별'을 행정동으로 바꿔버릴 수 있어 단위 목록은 유지 |
 | 데이터 선택 근거 기록 | `AgentState.dataset_selection`에 LLM 선택 원본(근거 포함)을 검사 전에 저장 | 선택 근거가 버려져 Agent 판단을 추적할 수 없었음. 잘못된 선택으로 실패한 경우도 기록 |
-
+| Dataset 후보 검색 | 카탈로그 전체(dataset_id 순 10개) 대신 pgvector 코사인 유사도 상위 10개(OpenAI `text-embedding-3-small`, HNSW). 검색 기록은 `dataset_search`로 Provenance에 남김. 임베딩이 없거나 다른 모델이거나 임베딩 문서가 현재 메타데이터와 다르면 `CATALOG_INDEX_STALE`로 종료 | 사용자 요청. 전달 문서 30번은 MVP 범위 밖으로 두었지만 33·34번 구조(pgvector는 후보 검색, LLM은 최종 선택, Validator는 검증)를 그대로 적용. 임베딩이 빠진 Dataset이 후보에서 조용히 사라지는 것을 막음 |

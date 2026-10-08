@@ -3,9 +3,9 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.main import create_app, get_llm
+from app.api.main import create_app, get_embedder, get_llm
 from app.config import Settings
-from tests.fakes import daycare_llm
+from tests.fakes import FakeEmbedder, daycare_llm
 from tests.support import QUESTION
 
 pytestmark = pytest.mark.integration
@@ -13,8 +13,16 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def client(database_url, catalog):
-    app = create_app(Settings(database_url=database_url, llm_provider="ollama", ollama_model=None))
+    settings = Settings(
+        database_url=database_url,
+        llm_provider="ollama",
+        ollama_model=None,
+        openai_api_key=None,
+        openai_embedding_model="test-embedding",
+    )
+    app = create_app(settings)
     app.dependency_overrides[get_llm] = lambda: daycare_llm()
+    app.dependency_overrides[get_embedder] = lambda: FakeEmbedder()
     with TestClient(app) as test_client:
         yield test_client
 
@@ -58,9 +66,24 @@ def test_missing_llm_configuration_is_503(client):
     assert "OLLAMA_MODEL" in response.json()["detail"]
 
 
+def test_missing_embedding_configuration_is_503(client):
+    client.app.dependency_overrides.pop(get_embedder)
+
+    response = client.post("/api/analyses", json={"question": QUESTION})
+
+    assert response.status_code == 503
+    assert "OPENAI_API_KEY" in response.json()["detail"]
+
+
 def test_catalog_and_health_endpoints(client):
     datasets = client.get("/api/datasets").json()
     health = client.get("/api/health").json()
 
     assert [d["dataset_id"] for d in datasets] == ["daycare_facility", "emd_boundary", "population_by_age"]
-    assert health == {"status": "ok", "database": "ok", "llm_provider": "ollama", "llm_model": ""}
+    assert health == {
+        "status": "ok",
+        "database": "ok",
+        "llm_provider": "ollama",
+        "llm_model": "",
+        "embedding_model": "test-embedding",
+    }
