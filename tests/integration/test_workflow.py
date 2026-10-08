@@ -1,7 +1,7 @@
 import pytest
 
 from app.domain.enums import RunStatus, WorkflowStep
-from app.domain.plan import AnalysisPlan
+from app.domain.plan import AnalysisPlan, Region
 from app.domain.state import DatasetSelection, InterpretedQuery
 from app.llm.base import LLMError, LLMOutputError
 from app.llm.embeddings import EmbeddingError
@@ -150,6 +150,18 @@ def test_interpretation_prompt_lists_analysis_units_per_region(pool, catalog):
 
     system = next(system for output_type, system, _ in llm.calls if output_type is InterpretedQuery)
     assert "- 서울특별시 (sido): emd(행정동)" in system
+    assert "region.level은 그 지역 자체의 행정 단위다 (예: 서울특별시 → sido)" in system
+
+
+def test_region_with_wrong_level_fails_showing_both_levels(pool, catalog):
+    # 실제 gpt-4o-mini 해석: 분석 단위(emd)를 지역 자체의 단위로 씀
+    wrong_level = interpreted().model_copy(update={"region": Region(name="서울특별시", level="emd")})
+    llm = daycare_llm(interpreted=[wrong_level])
+
+    state = AnalysisWorkflow(llm, pool, FakeEmbedder()).run(QUESTION)
+
+    assert (state.errors[0].step, state.errors[0].code) == (WorkflowStep.INTERPRET_QUERY, "REGION_NOT_SUPPORTED")
+    assert state.errors[0].message == "'서울특별시'(emd) 데이터가 없습니다. 분석 가능한 지역: 서울특별시(sido)"
 
 
 def test_unit_without_boundary_data_fails_with_available_units(pool, catalog):

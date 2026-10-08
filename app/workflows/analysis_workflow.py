@@ -117,9 +117,12 @@ class AnalysisWorkflow:
         if interpreted.region is None or interpreted.analysis_unit is None:
             raise WorkflowFailure("INCOMPLETE_INTERPRETATION", "분석 지역 또는 분석 단위를 해석하지 못했습니다")
         if not any(resolve_region(interpreted.region, r) for r in regions):
-            supported = ", ".join(r.name for r in regions)
+            # 지역은 이름과 단위가 모두 맞아야 하므로 둘 다 보여준다 (예: '서울특별시'(emd) vs 서울특별시(sido)).
+            supported = ", ".join(f"{r.name}({r.level})" for r in regions)
             raise WorkflowFailure(
-                "REGION_NOT_SUPPORTED", f"'{interpreted.region.name}' 데이터가 없습니다. 분석 가능한 지역: {supported}"
+                "REGION_NOT_SUPPORTED",
+                f"'{interpreted.region.name}'({interpreted.region.level}) 데이터가 없습니다. "
+                f"분석 가능한 지역: {supported}",
             )
         # 경계 데이터가 없는 단위는 계획을 만들어도 검증에서 실패하므로 LLM을 더 부르기 전에 끝낸다.
         units = analysis_units(datasets, interpreted.region)

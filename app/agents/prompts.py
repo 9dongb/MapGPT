@@ -39,12 +39,12 @@ def interpret_prompt(question: str, coverage: list[tuple[RegionRef, list[Spatial
 [공간 단위(analysis_unit)]
 {", ".join(_level(level) for level in SpatialLevel)}
 
-[데이터가 있는 지역과 분석 가능한 단위]
+[데이터가 있는 지역 — region.name (region.level): 분석 가능한 analysis_unit]
 {available or "- (없음)"}
 
 [규칙]
 1. 질문이 위 분석 유형으로 표현되지 않으면 intent, region, analysis_unit을 null로 두고 unsupported_reason에 이유를 쓴다.
-2. region.name은 공식 명칭으로 쓴다 (예: '서울' → '서울특별시'). 사용자가 말한 지역을 다른 지역으로 바꾸지 않는다.
+2. region은 분석할 지역 자체다. region.name은 공식 명칭으로 쓰고 (예: '서울' → '서울특별시'), region.level은 그 지역 자체의 행정 단위다 (예: 서울특별시 → sido). 결과를 나눌 단위는 region.level이 아니라 analysis_unit에 쓴다. 사용자가 말한 지역을 다른 지역으로 바꾸지 않는다.
 3. analysis_unit은 결과를 보여줄 공간 단위다 (예: '동별' → emd, '구별' → sigungu). 사용자가 말한 단위를 다른 단위로 바꾸지 않으며, 단위를 말하지 않았으면 그 지역에서 분석 가능한 단위를 쓴다.
 4. assumptions에는 위 분석 정책 정의 외에 질문을 해석하며 추가로 둔 가정만 적는다. 정책 정의를 다시 쓰지 않으며, 없으면 빈 목록으로 둔다.
 5. key_concepts에는 분석에 필요한 데이터 개념을 짧은 명사구로 적는다."""
