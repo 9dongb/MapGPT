@@ -2,7 +2,7 @@
 
 > 팀 공유용 문서 · 기준: 2026-10-09, `main` 커밋 `0958c83`
 >
-> 구현된 코드를 기준으로 정리했습니다. 더 자세한 설계와 변경 이력은 [MVP 설계안](design/mvp-design.md), 데이터 수집·적재의 현황과 향후 방향은 [데이터 담당자 전달 문서](data-handoff.md), 백엔드 운영 과제는 [백엔드 담당자 전달 문서](backend-handoff.md), 요구사항 원문은 [개발 전달 문서](../공간%20분석%20AI%20Agent%20개발%20전달%20문서.md), 실행 명령 요약은 [README](../README.md)에 있습니다.
+> 구현된 코드를 기준으로 정리했습니다. 더 자세한 설계와 변경 이력은 [MVP 설계안](design/mvp-design.md), 데이터 수집·적재의 현황과 향후 방향은 [데이터 담당자 전달 문서](data-handoff.md), 백엔드 운영 과제는 [백엔드 담당자 전달 문서](backend-handoff.md), 화면의 향후 과제는 [프론트엔드 담당자 전달 문서](frontend-handoff.md), 요구사항 원문은 [개발 전달 문서](../공간%20분석%20AI%20Agent%20개발%20전달%20문서.md), 실행 명령 요약은 [README](../README.md)에 있습니다.
 
 **목차**
 
@@ -871,6 +871,8 @@ frontend/
 - **MapLibre v6 참고**: 번들러 환경에서는 worker 경로를 직접 지정해야 해서 `maplibre-gl-worker.mjs?worker&url` + `setWorkerUrl`을 씁니다.
 
 `types.ts`는 백엔드 계약을 손으로 옮긴 것입니다. `FinalResponse`나 `WorkflowError`를 바꾸면 함께 고쳐야 합니다.
+
+지도 라이브러리 결정(MapLibre와 카카오맵), 첫 분석 주제에 묶인 문구, 아직 없는 기능과 프론트엔드 담당자가 결정할 사항은 [프론트엔드 담당자 전달 문서](frontend-handoff.md)에 있습니다.
 
 ---
 

@@ -421,5 +421,6 @@ GET  /api/analyses/{run_id}/events → 단계 이벤트 (SSE, 선택)
 
 - [에이전트 설계 개요](agent-design-overview.md): 전체 구조, 단계별 동작, 오류 코드, 디버깅
 - [데이터 담당자 전달 문서](data-handoff.md): DB 구조와 관계도, 적재 방식, 데이터 결정 사항 D1~D24
+- [프론트엔드 담당자 전달 문서](frontend-handoff.md): 화면이 쓰는 API, 진행 상황 표시(F3), 결과 URL(F4), 타입 동기화(F10)
 - [설계 문서](design/mvp-design.md)
 - [개발 전달 문서](../공간%20분석%20AI%20Agent%20개발%20전달%20문서.md): 원 요구사항. Provenance는 24번, 워크플로는 25번, 백엔드 기술 방향은 26번
