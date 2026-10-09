@@ -66,9 +66,9 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## 5. 가상환경 사용
 
-**가상환경은 conda 환경을 사용하세요.**
+**Python 3.12 이상의 프로젝트 가상환경을 사용하세요.**
 
-가상환경명: mapgpt
+conda 환경 `mapgpt` 또는 저장소 루트의 venv(`.venv`) 중 하나를 쓴다. 의존성은 `pyproject.toml`에 있으며 어느 쪽이든 `pip install -e ".[dev]"`로 설치한다. 만드는 방법은 `README.md`의 "준비"에 있다.
 
 ## 6. 작업 완료 시 커밋 생성
 
@@ -139,7 +139,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ## 9. 실행·검증 명령
 
 ```bash
-conda activate mapgpt
+conda activate mapgpt           # venv라면 .venv 활성화 (README.md 준비)
 pip install -e ".[dev]"
 npm --prefix frontend install
 docker compose up -d --build     # PostgreSQL + PostGIS + pgvector
@@ -149,7 +149,7 @@ python scripts/check.py          # 작업 후 검증 (macOS·Windows 공통)
 
 - **작업을 마치면 `python scripts/check.py`로 검증하고 통과를 확인한다.** ruff 린트·포맷, pytest(unit + integration), 화면 타입 검사·빌드를 차례로 실행하고, 하나라도 실패하면 종료 코드 1로 끝난다. 실패를 남긴 채 끝내지 않으며, 고칠 수 없으면 실패한 단계와 이유를 보고한다.
 - integration 테스트는 Docker DB의 `mapgpt_test`를 쓴다(없으면 자동 생성). 검증 스크립트는 DB에 연결하지 못하면 skip 대신 실패로 처리한다. `pytest`를 직접 돌릴 때는 skip을 통과로 보고하지 않는다.
-- Claude Code에서는 `.claude/settings.json`의 Stop 훅이 작업을 끝낼 때 같은 검증을 자동으로 실행한다(코드 경로에 변경이 있을 때만). 실패하면 한 번 더 고치게 하고, 그래도 실패하면 사용자에게 경고를 남긴다. 훅이 mapgpt 환경의 파이썬을 찾지 못하면 `MAPGPT_PYTHON` 환경 변수(예: `.claude/settings.local.json`의 `env`)에 경로를 지정한다.
+- Claude Code에서는 `.claude/settings.json`의 Stop 훅이 작업을 끝낼 때 같은 검증을 자동으로 실행한다(코드 경로에 변경이 있을 때만). 실패하면 한 번 더 고치게 하고, 그래도 실패하면 사용자에게 경고를 남긴다. 훅이 프로젝트 파이썬(conda 환경 `mapgpt` 또는 `.venv`)을 찾지 못하면 `MAPGPT_PYTHON` 환경 변수(예: `.claude/settings.local.json`의 `env`)에 경로를 지정한다.
 - ruff 설정은 `pyproject.toml`에 있다. 바꾼 파일만 포맷하고, 관계없는 파일의 포맷은 바꾸지 않는다.
 - 데이터 적재(`download`, `ingest`)와 API·화면 실행 방법은 `README.md`에 있다.
 - `pytest -m e2e`는 적재된 개발 DB와 실제 LLM이 필요하다. 로컬 LLM으로 돌릴 때는 `.env`를 고치지 말고 환경 변수로 덮어쓴다. 예: `LLM_PROVIDER=ollama OLLAMA_MODEL=qwen3.5:9b OLLAMA_REASONING_EFFORT=none pytest -m e2e` (thinking 모델은 `none`으로 꺼야 실용적인 속도가 나온다).

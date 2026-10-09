@@ -84,7 +84,7 @@ state = AnalysisWorkflow(llm, pool, embedder).run(question)  # -> AgentState
 
 | 구분 | 사용 기술 |
 |---|---|
-| 언어·환경 | Python 3.12, conda 환경 `mapgpt` |
+| 언어·환경 | Python 3.12, conda 환경 `mapgpt` 또는 venv(`.venv`). 의존성은 `pyproject.toml`에 있다(requirements.txt 없음) |
 | API | FastAPI 0.142 (Starlette 1.7), uvicorn 0.54 |
 | 계약·설정 | Pydantic 2.13, pydantic-settings 2.15 |
 | DB 드라이버 | psycopg 3.3 + psycopg_pool 3.3. ORM 없이 SQL을 직접 쓴다 |
@@ -113,7 +113,7 @@ state = AnalysisWorkflow(llm, pool, embedder).run(question)  # -> AgentState
 ### 3.3 실행 방법
 
 ```bash
-conda activate mapgpt
+conda activate mapgpt                # venv라면 .venv 활성화 (README 준비)
 pip install -e ".[dev]"
 cp .env.example .env                 # 키를 채움
 docker compose up -d --build         # PostgreSQL + PostGIS + pgvector

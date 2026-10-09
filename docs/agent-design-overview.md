@@ -663,7 +663,7 @@ Dataset별 처리:
 
 | 구분 | 사용 기술 (검증 버전) |
 |---|---|
-| 언어 | Python 3.12 (conda 환경 `mapgpt`) |
+| 언어 | Python 3.12 (conda 환경 `mapgpt` 또는 venv `.venv`) |
 | API | FastAPI 0.142, uvicorn 0.54 |
 | 계약·설정 | Pydantic 2.13, pydantic-settings 2.15 |
 | DB | psycopg 3.3 + psycopg_pool 3.3 |
@@ -902,7 +902,7 @@ cd frontend && npm run typecheck
 
 - 구현 전에 가정을 밝히고, 모호하면 묻습니다. 요청 범위 밖의 기능·추상화는 만들지 않습니다.
 - 바꾼 모든 줄이 요청과 직접 연결되게 합니다. 관련 없는 리팩터링이나 포맷 변경은 섞지 않습니다.
-- Python 가상환경은 conda `mapgpt`를 씁니다.
+- Python 가상환경은 conda `mapgpt` 또는 venv(`.venv`)를 씁니다. 의존성은 `pyproject.toml`에 있습니다.
 - 작업이 끝나면 diff를 검토하고 `python scripts/check.py`(린트·포맷, unit·integration 테스트, 화면 타입 검사·빌드)로 검증한 뒤 **한국어 커밋 메시지**로 커밋합니다. Claude Code에서는 Stop 훅이 이 검증을 자동으로 실행합니다. 요청 하나에 커밋 하나가 기본입니다.
 - 포맷과 린트(ruff)는 위 검증에 포함됩니다. 설정(줄 길이 120, E·W·F·B 규칙, 긴 문자열 E501 제외)은 `pyproject.toml`에 있습니다.
 - 프로젝트 경계 규칙, 함께 고쳐야 하는 것, 비용·보안·외부 반영 규칙 전체는 [AGENTS.md](../AGENTS.md) 7~12장에 있습니다.
@@ -911,10 +911,10 @@ cd frontend && npm run typecheck
 
 ## 9. 로컬 실행 방법
 
-준비물: conda(Python 3.12), Docker, Node.js 20+, OpenAI API 키(임베딩 필수), 서울 열린데이터광장 인증키(어린이집 수집 시), 로컬 LLM을 쓰려면 Ollama(선택)
+준비물: Python 3.12 이상(conda 또는 venv), Docker, Node.js 20+, OpenAI API 키(임베딩 필수), 서울 열린데이터광장 인증키(어린이집 수집 시), 로컬 LLM을 쓰려면 Ollama(선택)
 
 ```bash
-conda activate mapgpt
+conda activate mapgpt                # venv라면 .venv 활성화 (README 준비)
 pip install -e ".[dev]"
 cp .env.example .env                 # 키를 채움
 docker compose up -d --build         # PostgreSQL + PostGIS + pgvector

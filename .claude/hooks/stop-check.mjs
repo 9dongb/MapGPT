@@ -32,15 +32,19 @@ function codeChanged() {
   return git.status !== 0 || git.stdout.trim() !== "";
 }
 
-// mapgpt conda 환경의 파이썬. 훅은 셸 프로필을 읽지 않으므로 conda activate에 기대지 않는다.
+// 프로젝트 파이썬: conda 환경 mapgpt 또는 저장소의 venv(.venv).
+// 훅은 셸 프로필을 읽지 않으므로 가상환경 활성화에 기대지 않고 경로를 찾는다.
 function findPython() {
   if (process.env.MAPGPT_PYTHON) return process.env.MAPGPT_PYTHON;
-  const envDirs = [];
-  if (process.env.CONDA_PREFIX && basename(process.env.CONDA_PREFIX) === "mapgpt") envDirs.push(process.env.CONDA_PREFIX);
-  if (process.env.CONDA_EXE) envDirs.push(join(dirname(dirname(process.env.CONDA_EXE)), "envs", "mapgpt"));
-  envDirs.push(...CONDA_DIRS.map((dir) => join(homedir(), dir, "envs", "mapgpt")));
-  const executable = (dir) => (process.platform === "win32" ? join(dir, "python.exe") : join(dir, "bin", "python"));
-  return envDirs.map(executable).find((path) => existsSync(path));
+  const windows = process.platform === "win32";
+  const condaPython = (dir) => (windows ? join(dir, "python.exe") : join(dir, "bin", "python"));
+  const venvPython = (dir) => (windows ? join(dir, "Scripts", "python.exe") : join(dir, "bin", "python"));
+  const candidates = [];
+  if (process.env.CONDA_PREFIX && basename(process.env.CONDA_PREFIX) === "mapgpt") candidates.push(condaPython(process.env.CONDA_PREFIX));
+  candidates.push(venvPython(join(ROOT, ".venv")));
+  if (process.env.CONDA_EXE) candidates.push(condaPython(join(dirname(dirname(process.env.CONDA_EXE)), "envs", "mapgpt")));
+  candidates.push(...CONDA_DIRS.map((dir) => condaPython(join(homedir(), dir, "envs", "mapgpt"))));
+  return candidates.find((path) => existsSync(path));
 }
 
 const input = readInput();
@@ -48,7 +52,7 @@ if (!codeChanged()) process.exit(0);
 
 const python = findPython();
 if (!python) {
-  warn("작업 후 검증을 건너뛰었습니다: mapgpt conda 환경의 파이썬을 찾지 못했습니다. MAPGPT_PYTHON 환경 변수(예: .claude/settings.local.json의 env)에 경로를 지정하세요.");
+  warn("작업 후 검증을 건너뛰었습니다: 프로젝트 파이썬(conda 환경 mapgpt 또는 .venv)을 찾지 못했습니다. MAPGPT_PYTHON 환경 변수(예: .claude/settings.local.json의 env)에 경로를 지정하세요.");
 }
 
 const check = spawnSync(python, [join(ROOT, "scripts", "check.py")], {

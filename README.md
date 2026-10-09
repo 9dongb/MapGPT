@@ -13,10 +13,33 @@ LLM은 질문 해석 · Dataset 선택 · Analysis Plan 생성 · 결과 설명�
 
 ## 준비
 
-- conda 환경 `mapgpt` (Python 3.12), Docker, Node.js 20+
+- Python 3.12 이상, Docker, Node.js 20+
+- Python 가상환경은 conda와 venv 중 하나를 씁니다. 의존성은 `pyproject.toml`에 있어 `requirements.txt`는 따로 없고, 어느 쪽이든 `pip install -e ".[dev]"`로 설치합니다.
+
+conda:
 
 ```bash
+conda create -n mapgpt python=3.12
 conda activate mapgpt
+```
+
+venv (macOS·Linux):
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+```
+
+venv (Windows PowerShell):
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1   # 실행 정책 오류가 나면: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+가상환경을 활성화한 뒤:
+
+```bash
 pip install -e ".[dev]"
 cp .env.example .env   # 키를 채웁니다
 docker compose up -d --build   # PostGIS + pgvector (docker/postgres 이미지 빌드)

@@ -1,8 +1,7 @@
 """작업 후 검증: 린트·포맷, 테스트(unit + integration), 화면 타입 검사·빌드를 차례로 실행한다.
 
-mapgpt 환경의 파이썬으로 실행한다 (macOS·Linux·Windows 공통).
+프로젝트 가상환경(conda 환경 mapgpt 또는 venv)을 활성화하고 실행한다 (macOS·Linux·Windows 공통).
 
-    conda activate mapgpt
     python scripts/check.py
 
 모든 단계를 실행한 뒤 하나라도 실패하면 종료 코드 1로 끝난다.
@@ -52,7 +51,7 @@ def main() -> int:
     sys.stdout.reconfigure(errors="replace")
     if importlib.util.find_spec("pytest") is None or importlib.util.find_spec("ruff") is None:
         print(
-            'mapgpt 환경의 파이썬으로 실행하세요: conda activate mapgpt 후 pip install -e ".[dev]", python scripts/check.py'
+            '프로젝트 가상환경(conda 환경 mapgpt 또는 .venv)을 활성화하고 pip install -e ".[dev]" 후 python scripts/check.py를 실행하세요'
         )
         return 1
 
