@@ -83,6 +83,27 @@ analysis  ── run                  분석 실행 기록 (Provenance)
 
 Dataset 테이블의 이름은 `datasets.<dataset_id>`로 정해져 있다. 분석 코드가 이 규칙으로 테이블을 찾는다.
 
+테이블 사이 관계는 다음과 같다 (실선은 외래키, 점선은 분석할 때 맺는 결합, 실행 기록인 `analysis`는 생략).
+
+```mermaid
+flowchart LR
+    subgraph catalog["catalog"]
+        dataset[("dataset<br/>메타데이터")]
+        embedding[("dataset_embedding<br/>검색 임베딩")]
+    end
+    subgraph datasets["datasets"]
+        population[("population_by_age<br/>행정동별 연령별 인구")]
+        daycare[("daycare_facility<br/>어린이집 위치 · Point")]
+        boundary[("emd_boundary<br/>행정동 경계 · MultiPolygon")]
+    end
+    embedding -->|"외래키 dataset_id"| dataset
+    dataset -.->|"dataset_id = 테이블 이름"| datasets
+    population -.->|"adm_cd 코드 결합<br/>(코드 체계 mois_adm_cd)"| boundary
+    daycare -.->|"공간 결합<br/>(좌표가 경계 안, ST_Covers)"| boundary
+```
+
+Dataset 테이블끼리는 외래키가 없다. 표 데이터는 경계와 같은 코드 체계의 조인 키로, 점 데이터는 좌표가 경계 안에 있는지로 분석할 때 결합한다. 결합할 수 있는지는 메타데이터(조인 키의 코드 체계, 좌표계)로 판단하므로, 저장 구조를 바꾸더라도 6장의 계약을 지키면 결합은 유지된다.
+
 ### 2.3 카탈로그 메타데이터 (`catalog.dataset.metadata`)
 
 메타데이터는 Pydantic 모델 `DatasetMetadata`([app/domain/catalog.py](../app/domain/catalog.py))를 JSON으로 저장한 것이다. 대부분의 값은 [app/catalog/definitions.py](../app/catalog/definitions.py)에 코드로 적혀 있고(정적 정의), 일부는 적재할 때 계산한다.
