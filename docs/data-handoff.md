@@ -527,7 +527,7 @@ Dataset은 후보 → 값 검사 → 매핑 초안 → 검토 → 신뢰 순서�
 | GIS 실행 | [app/gis/tools.py](../app/gis/tools.py) |
 | CLI | [app/cli.py](../app/cli.py) |
 | 설계 문서 | [docs/design/mvp-design.md](design/mvp-design.md) |
-| 개발 전달 문서 (원 요구사항, 데이터 확장은 30·33~36번) | [공간 분석 AI Agent 개발 전달 문서.md](../공간%20분석%20AI%20Agent%20개발%20전달%20문서.md) |
+| 개발 전달 문서 (원 요구사항, 데이터 확장은 30·33~36번) | [공간 분석 AI Agent 개발 전달 문서.md](공간%20분석%20AI%20Agent%20개발%20전달%20문서.md) |
 
 ### 8.2 외부 자료 (2026-10 조사)
 

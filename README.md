@@ -7,7 +7,7 @@
 
 - 설계 개요(팀 공유용): [docs/agent-design-overview.md](docs/agent-design-overview.md)
 - 설계: [docs/design/mvp-design.md](docs/design/mvp-design.md)
-- 요구사항 원문: [공간 분석 AI Agent 개발 전달 문서.md](공간%20분석%20AI%20Agent%20개발%20전달%20문서.md)
+- 요구사항 원문: [공간 분석 AI Agent 개발 전달 문서.md](docs/공간%20분석%20AI%20Agent%20개발%20전달%20문서.md)
 
 LLM은 질문 해석 · Dataset 선택 · Analysis Plan 생성 · 결과 설명만 합니다. SQL이나 코드를 생성하지 않으며, 모든 계산은 검증된 Plan을 GIS Tool(parameterized SQL)이 실행합니다.
 
