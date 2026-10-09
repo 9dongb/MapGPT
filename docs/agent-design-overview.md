@@ -904,7 +904,8 @@ cd frontend && npm run typecheck
 - 바꾼 모든 줄이 요청과 직접 연결되게 합니다. 관련 없는 리팩터링이나 포맷 변경은 섞지 않습니다.
 - Python 가상환경은 conda `mapgpt`를 씁니다.
 - 작업이 끝나면 diff를 검토하고 가능한 검증(테스트, 린트)을 한 뒤 **한국어 커밋 메시지**로 커밋합니다. 요청 하나에 커밋 하나가 기본입니다.
-- 포맷과 린트는 `ruff format --line-length 120`, `ruff check --select E,W,F,B --line-length 120`으로 확인해 왔습니다. 프롬프트 문자열의 긴 줄(E501)은 예외로 두고 있으며, 아직 `pyproject.toml`에 ruff 설정이 없습니다.
+- 포맷과 린트는 `ruff check app tests`, `ruff format --check app tests`로 확인합니다. 설정(줄 길이 120, E·W·F·B 규칙, 긴 문자열 E501 제외)은 `pyproject.toml`에 있습니다.
+- 프로젝트 경계 규칙, 함께 고쳐야 하는 것, 비용·보안·외부 반영 규칙 전체는 [AGENTS.md](../AGENTS.md) 7~12장에 있습니다.
 
 ---
 

@@ -282,7 +282,7 @@ API 요청은 `datasets`와 `catalog`를 읽기만 한다. 현재 개발 DB 크�
 | SQL 안전성 | LLM은 SQL을 만들지 않는다. 테이블·컬럼 이름은 메타데이터로 확인한 뒤 `Identifier`로, 값은 파라미터로 넣는다. 분석 SQL은 읽기 전용 트랜잭션에서 실행한다 |
 | LLM 데이터 보존 | OpenAI Responses 호출은 `store=False`로 보낸다 |
 | 배포 | 없음. compose에는 DB만 있고, API와 화면은 개발 서버로 실행한다. 화면 빌드 결과(`npm run build` → `frontend/dist`)를 서빙하는 곳도 없다 |
-| CI | 없음. 린트·포맷 설정도 저장소에 없다 |
+| CI | 없음. 린트·포맷은 `pyproject.toml`의 ruff 설정만 있다 |
 | 의존성 고정 | Python은 `pyproject.toml`에 하한만 있고 lock 파일이 없다. 화면은 `package-lock.json`이 있다. LangGraph를 설치할 때 의존성 제약 때문에 `websockets`가 17.2에서 16.1.1로 내려간 적이 있다 |
 
 ## 8. 과제와 개발 쪽 의견
@@ -352,7 +352,7 @@ GET  /api/analyses/{run_id}/events → 단계 이벤트 (SSE, 선택)
 
 - unit·integration 테스트를 CI에서 돌린다. integration은 PostGIS·pgvector DB가 필요하므로 `docker/postgres` 이미지를 서비스로 띄운다.
 - E2E는 실제 LLM 키가 필요하므로 수동으로 돌리거나 별도 일정으로 돌린다.
-- Python lock 파일(uv, pip-tools 등)과 린트·포맷 설정을 추가한다.
+- Python lock 파일(uv, pip-tools 등)을 추가하고, CI에서 `ruff check app tests`와 `ruff format --check app tests`도 돌린다.
 
 ### 8.8 적재 작업 실행 환경 (데이터 담당 D18·D23과 함께)
 
