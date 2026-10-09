@@ -91,7 +91,7 @@ Vite가 "500KB를 넘는 청크" 경고를 낸다.
   - 라이트·다크 전환과 좁은 화면 배치가 동작한다.
   - 지도 색 램프는 라이트·다크 모두 순서형 팔레트 검사를 통과했다.
 - **없는 것:**
-  - 테스트, ESLint·Prettier 설정, CI가 없다. 검사는 `npm run typecheck`뿐이다.
+  - 테스트, ESLint·Prettier 설정, CI가 없다. 검사는 타입 검사와 빌드뿐이고, 저장소 공통 작업 후 검증(`python scripts/check.py`)에 들어 있다.
   - `ChoroplethMap.tsx`에 `eslint-disable` 주석이 하나 있지만, ESLint는 설치되어 있지 않다.
 
 ## 2. 백엔드·에이전트와의 계약

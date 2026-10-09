@@ -71,6 +71,7 @@ API: `POST /api/analyses`, `GET /api/analyses/{run_id}` (Provenance), `GET /api/
 
 ```bash
 pytest              # unit + integration (integration은 docker compose의 PostGIS에 mapgpt_test DB를 만들어 사용)
+python scripts/check.py   # 작업 후 검증: ruff, pytest(unit + integration, DB 필요), 화면 타입 검사·빌드
 ```
 
 ```bash

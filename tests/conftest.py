@@ -36,7 +36,11 @@ def database_url() -> str:
             conn.commit()
             init_schema(conn)
     except psycopg.OperationalError as error:
-        pytest.skip(f"PostGIS 테스트 DB에 연결할 수 없습니다: {error}. docker compose up -d 후 다시 실행하세요")
+        message = f"PostGIS 테스트 DB에 연결할 수 없습니다: {error}. docker compose up -d 후 다시 실행하세요"
+        # 작업 후 검증(scripts/check.py)에서는 DB가 없어 skip된 테스트를 통과로 오인하지 않게 실패로 처리한다.
+        if os.environ.get("MAPGPT_REQUIRE_DB") == "1":
+            pytest.fail(message, pytrace=False)
+        pytest.skip(message)
     return TEST_DATABASE_URL
 
 

@@ -903,8 +903,8 @@ cd frontend && npm run typecheck
 - 구현 전에 가정을 밝히고, 모호하면 묻습니다. 요청 범위 밖의 기능·추상화는 만들지 않습니다.
 - 바꾼 모든 줄이 요청과 직접 연결되게 합니다. 관련 없는 리팩터링이나 포맷 변경은 섞지 않습니다.
 - Python 가상환경은 conda `mapgpt`를 씁니다.
-- 작업이 끝나면 diff를 검토하고 가능한 검증(테스트, 린트)을 한 뒤 **한국어 커밋 메시지**로 커밋합니다. 요청 하나에 커밋 하나가 기본입니다.
-- 포맷과 린트는 `ruff check app tests`, `ruff format --check app tests`로 확인합니다. 설정(줄 길이 120, E·W·F·B 규칙, 긴 문자열 E501 제외)은 `pyproject.toml`에 있습니다.
+- 작업이 끝나면 diff를 검토하고 `python scripts/check.py`(린트·포맷, unit·integration 테스트, 화면 타입 검사·빌드)로 검증한 뒤 **한국어 커밋 메시지**로 커밋합니다. Claude Code에서는 Stop 훅이 이 검증을 자동으로 실행합니다. 요청 하나에 커밋 하나가 기본입니다.
+- 포맷과 린트(ruff)는 위 검증에 포함됩니다. 설정(줄 길이 120, E·W·F·B 규칙, 긴 문자열 E501 제외)은 `pyproject.toml`에 있습니다.
 - 프로젝트 경계 규칙, 함께 고쳐야 하는 것, 비용·보안·외부 반영 규칙 전체는 [AGENTS.md](../AGENTS.md) 7~12장에 있습니다.
 
 ---
