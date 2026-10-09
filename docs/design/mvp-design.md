@@ -39,7 +39,7 @@
  React + MapLibre UI ──POST /api/analyses──▶ FastAPI (app/api)
                                                   │
                                                   ▼
-                                   AnalysisWorkflow (상태 머신, app/workflows)
+                                   AnalysisWorkflow (LangGraph, app/workflows)
    ┌───────────────┬───────────────┬──────────────┼───────────────┬───────────────┐
    ▼               ▼               ▼              ▼               ▼               ▼
  LLM Steps     DatasetCatalog  PlanValidator  OperationExecutor ResultValidator RunRepository
@@ -69,7 +69,7 @@
 | `validation` | Plan/Result 결정론적 검증 | domain |
 | `gis` | GIS Tool, CRS 정책, Filter → SQL 컴파일 | domain |
 | `executor` | Operation → GIS Tool 매핑 실행 | domain, gis |
-| `workflows` | 상태 머신, 최종 응답 조립 | 위 전부 |
+| `workflows` | LangGraph 분석 그래프(노드·조건부 엣지)와 실행기, 최종 응답 조립 | 위 전부, langgraph |
 | `data_sources` | 외부 원본 → 내부 표준 Dataset 정규화·적재 | domain, catalog |
 | `api` | HTTP 경계 | workflows, catalog |
 
@@ -125,7 +125,7 @@ MapGPT/
 │   │   ├── prompts.py
 │   │   └── steps.py            # interpret / select / plan / explain
 │   ├── workflows/
-│   │   ├── analysis_workflow.py # 상태 머신 Orchestrator
+│   │   ├── analysis_workflow.py # LangGraph 분석 그래프 + 실행기(Provenance 저장)
 │   │   └── response.py          # 결정론적 응답 섹션(방법·가정·한계) 조립
 │   ├── repositories/
 │   │   ├── catalog_repository.py
@@ -452,7 +452,7 @@ class AgentState(BaseModel):
     finished_at: datetime | None = None
 ```
 
-상태 전체를 Provenance(`analysis.run.state`)에 JSONB로 저장한다. "LLM이 무엇을 보고 무엇을 판단했는가"를 재현하기 위해서다.
+상태 전체를 Provenance(`analysis.run.state`)에 JSONB로 저장한다. "LLM이 무엇을 보고 무엇을 판단했는가"를 재현하기 위해서다. `AgentState`는 LangGraph 그래프 상태로 그대로 쓰이고, LLM·카탈로그·DB 세션처럼 기록하지 않는 실행 의존성은 Runtime context로 주입한다.
 
 ---
 
@@ -577,7 +577,7 @@ UI ─POST /api/analyses {question}─▶ API ─▶ AnalysisWorkflow.run(questi
  ◀─ {run_id, status, result, errors} ── UI: 지도 + Ranking + Metric + Dataset·기준 시점 + 방법·가정·한계
 ```
 
-각 단계는 `(state) -> 다음 단계`를 반환하는 핸들러다. 예외는 `WorkflowError`로 기록하고 `failed`로 전이한다. 성공이든 실패든 항상 Provenance를 저장한다.
+각 단계는 LangGraph 노드이고(노드 이름 = `WorkflowStep`), 바뀐 상태 필드만 반환한다. 단계 안의 예외는 노드가 `WorkflowError`로 `errors`에 기록하고(그 전에 기록한 값은 유지), 조건부 엣지가 `errors`를 보고 END로 보낸다. 계획 루프는 `build_analysis_plan`(스키마 불일치 → 자기 자신)과 `validate_plan`(오류 → `build_analysis_plan`) 뒤의 라우터가 정한다. 그래프가 끝나면 실행기가 `succeeded`/`failed`를 정하고, 성공이든 실패든 항상 Provenance를 저장한다.
 
 **최종 응답(FinalResponse) 구성 원칙**: LLM이 쓰는 것은 `summary`뿐이다. `metric`, `ranking`, `map_layer`, `datasets`(+기준 시점), `analysis_method`(실행 Plan으로 렌더링), `assumptions`(정책 + 해석 가정), `limitations`(정책 고정 한계 + Dataset quality_notes + 검증 경고 + 기준 시점 차이)는 결정론적으로 조립한다.
 
@@ -775,3 +775,4 @@ Validation(5)을 LLM 연동(6)보다 먼저 한다. LLM 출력은 처음부터 �
 | 데이터 선택 근거 기록 | `AgentState.dataset_selection`에 LLM 선택 원본(근거 포함)을 검사 전에 저장 | 선택 근거가 버려져 Agent 판단을 추적할 수 없었음. 잘못된 선택으로 실패한 경우도 기록 |
 | Dataset 후보 검색 | 카탈로그 전체(dataset_id 순 10개) 대신 pgvector 코사인 유사도 상위 10개(OpenAI `text-embedding-3-small`, HNSW). 검색 기록은 `dataset_search`로 Provenance에 남김. 임베딩이 없거나 다른 모델이거나 임베딩 문서가 현재 메타데이터와 다르면 `CATALOG_INDEX_STALE`로 종료 | 사용자 요청. 전달 문서 30번은 MVP 범위 밖으로 두었지만 33·34번 구조(pgvector는 후보 검색, LLM은 최종 선택, Validator는 검증)를 그대로 적용. 임베딩이 빠진 Dataset이 후보에서 조용히 사라지는 것을 막음 |
 | 해석 프롬프트 region.level | `region.level`은 지역 자체의 행정 단위(서울특별시 → sido)이고 결과를 나눌 단위는 `analysis_unit`이라는 규칙 추가. `REGION_NOT_SUPPORTED` 메시지에 지역 단위를 함께 표시 | gpt-4o-mini가 `region.level`에 분석 단위(emd)를 넣어 해석 10회 중 8회가 `REGION_NOT_SUPPORTED`로 실패(수정 후 10회 모두 sido). 필드 description은 strict 스키마 변환에서 `$ref` 옆 키워드로 제거되므로 프롬프트에 둠 |
+| Workflow 구현 | 직접 작성한 상태 머신(`WorkflowStep → 핸들러` dict) → LangGraph `StateGraph`. 상태는 `AgentState` 그대로, 의존성은 Runtime context, 실패는 `errors` + 조건부 엣지로 END. 외부 인터페이스 `AnalysisWorkflow.run`은 유지 | 사용자 요청. 전달 문서 25번은 LangGraph를 선택 사항으로 두고 Core Domain·GIS가 프레임워크에 종속되지 않을 것을 요구하므로 LangGraph 의존을 `app/workflows`에 한정 |

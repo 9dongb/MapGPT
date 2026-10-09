@@ -76,7 +76,7 @@
 flowchart TB
     subgraph Backend["백엔드 (FastAPI)"]
         API["REST API<br/>app/api"]
-        WF["AnalysisWorkflow<br/>상태 머신"]
+        WF["AnalysisWorkflow<br/>LangGraph StateGraph"]
         STEPS["LLM 단계<br/>해석 · 선택 · 계획 · 설명"]
         CAT["DatasetCatalog<br/>후보 검색"]
         VAL["Plan / Result<br/>Validator"]
@@ -118,7 +118,7 @@ CLI의 `analyze` 명령도 같은 Workflow를 호출합니다. 데이터를 채�
 | validation | `app/validation` | Plan / Result 결정론적 검증 |
 | gis | `app/gis` | GIS Tool, CRS 정책, FilterExpression → SQL 컴파일 |
 | executor | `app/executor` | Operation을 GIS Tool에 매핑해 순서대로 실행 |
-| workflows | `app/workflows` | 상태 머신, 최종 응답 조립 |
+| workflows | `app/workflows` | LangGraph 분석 그래프와 실행기, 최종 응답 조립. LangGraph 의존은 여기에만 둠 |
 | repositories | `app/repositories` | `catalog`·`analysis` 스키마 읽기/쓰기 |
 | data_sources | `app/data_sources` | 외부 원본을 내부 표준 Dataset으로 적재 |
 | api / cli | `app/api`, `app/cli.py` | HTTP 경계, 운영 명령. 둘 다 같은 workflow를 호출 |
@@ -169,9 +169,15 @@ sequenceDiagram
 
 LLM이 쓴 문장 중 화면에 그대로 보이는 것은 요약(summary), 해석 가정(assumptions), Operation 라벨, 지원하지 않는 질문의 이유(unsupported_reason)뿐입니다. 수치, 순위, 계산 방법 문장, 한계는 모두 코드가 실행 기록에서 만듭니다.
 
-### 3.2 상태 머신
+### 3.2 LangGraph 워크플로
 
-[`AnalysisWorkflow`](../app/workflows/analysis_workflow.py)는 단계마다 "다음 단계"를 돌려주는 핸들러로 이루어진 상태 머신입니다. 전달 문서상 LangGraph는 선택 사항이고 흐름이 고정적이어서, 프레임워크 없이 `WorkflowStep → 핸들러` dict로 구현했습니다.
+[`AnalysisWorkflow`](../app/workflows/analysis_workflow.py)는 LangGraph `StateGraph`로 구성한 그래프(`ANALYSIS_GRAPH`)를 실행합니다.
+
+- **상태**: Provenance로 저장하는 `AgentState`를 그래프 상태로 그대로 씁니다. 노드는 바뀐 필드만 돌려줍니다.
+- **노드**: `WorkflowStep` 9개가 곧 노드 이름입니다. 단계 함수는 결과를 기록하다가 실패하면 `WorkflowFailure`를 던지고, 노드 래퍼(`_node`)가 그때까지 기록한 값(해석·후보·계획 시도 등)을 남긴 채 오류를 `errors`에 더합니다.
+- **엣지**: 모든 단계 뒤는 조건부 엣지입니다. `errors`가 있으면 END, 없으면 다음 단계로 갑니다.
+- **의존성**: LLM, 카탈로그, 읽기 전용 DB 세션은 실행마다 Runtime context(`_RunContext`)로 주입합니다. 상태에는 Provenance로 남길 값만 둡니다.
+- **프레임워크 경계**: LangGraph는 `app/workflows`에서만 씁니다. Domain·GIS·Validation 계층은 LangGraph를 모릅니다(전달 문서 25번).
 
 ```mermaid
 stateDiagram-v2
@@ -189,7 +195,12 @@ stateDiagram-v2
     generate_explanation --> [*]
 ```
 
-어느 단계에서든 실패하면 `WorkflowFailure(code, message, issues)`로 멈추고 상태가 `failed`가 됩니다. 예상하지 못한 예외는 `INTERNAL_ERROR`로 기록합니다. 성공·실패와 관계없이 마지막(`finally`)에 Provenance를 저장합니다.
+그림에서는 생략했지만 모든 단계에서 END로 가는 실패 엣지가 있습니다. 예상하지 못한 예외는 `INTERNAL_ERROR`로 기록합니다. 그래프가 끝나면 실행기가 `errors` 유무로 `succeeded`/`failed`를 정하고, 성공·실패와 관계없이 Provenance를 저장합니다. 계획 단계의 분기는 라우터 두 개가 정합니다.
+
+- `build_analysis_plan` 뒤: 계획이 나오면 `validate_plan`, 스키마 불일치로 계획이 없으면 다시 `build_analysis_plan`
+- `validate_plan` 뒤: 오류가 없으면 `load_data`, 있으면 다시 `build_analysis_plan`. 두 번째 시도도 실패하면 노드가 `PLAN_INVALID`를 기록하고 END로 갑니다
+
+그래프 구조는 코드에서 `ANALYSIS_GRAPH.get_graph().draw_mermaid()`로 바로 그릴 수 있습니다.
 
 | # | 단계 (`WorkflowStep`) | 주체 | 입력 → 출력 | 대표 실패 코드 |
 |---|---|---|---|---|
@@ -657,6 +668,7 @@ Dataset별 처리:
 | 계약·설정 | Pydantic 2.13, pydantic-settings 2.15 |
 | DB | psycopg 3.3 + psycopg_pool 3.3 |
 | LLM·임베딩 | OpenAI Python SDK 3.26 (Ollama도 OpenAI 호환 API로 호출) |
+| 워크플로 | LangGraph 1.2 (`StateGraph`) |
 | 테스트 | pytest, httpx |
 
 ### 6.2 디렉터리 구조
@@ -669,7 +681,7 @@ app/
 │   ├── main.py                # FastAPI 앱, 라우트, 의존성(DB 풀·LLM·임베딩)
 │   └── schemas.py             # 요청/응답 모델
 ├── workflows/
-│   ├── analysis_workflow.py   # 상태 머신 Orchestrator
+│   ├── analysis_workflow.py   # LangGraph 분석 그래프(노드·라우터)와 실행기
 │   └── response.py            # 최종 응답 조립, 설명용 사실 추출
 ├── agents/
 │   ├── prompts.py             # 단계별 시스템/사용자 프롬프트
@@ -998,7 +1010,7 @@ FROM analysis.run GROUP BY 1, 2, 3 ORDER BY 1, 2;
 | LLM은 계획(JSON)만 만들고 실행은 GIS Tool이 한다 | 재현성·검증 가능성·SQL 주입 차단. 같은 계획이면 같은 결과 |
 | Operation은 타입 있는 discriminated union, 필터는 1단계 그룹까지만 | LLM 출력 공간을 좁혀 검증 가능하게 유지. 거대한 GIS DSL은 만들지 않음(전달 문서 39번) |
 | 데이터는 PostGIS에 두고 View(메타데이터 + 필터)만 전달 | 큰 데이터를 Python으로 옮기지 않고 SQL 한 번에 계산 |
-| 직접 구현한 상태 머신 | 흐름이 고정적이라 프레임워크 없이 dict 핸들러로 충분. 단계별 실패 코드와 Provenance 기록이 단순 |
+| 워크플로는 LangGraph `StateGraph`, 상태는 `AgentState` 그대로 | 단계와 분기가 그래프로 드러나 새 단계·분기를 더하기 쉬움. 상태가 곧 Provenance 계약이라 기록 형식이 바뀌지 않고, LangGraph 의존은 `app/workflows`에 한정함(전달 문서 25번). 처음에는 직접 만든 상태 머신이었고 사용자 요청으로 전환함 |
 | 계획 재생성은 검증 오류 피드백과 함께 1회 | 작은 모델도 피드백으로 복구되는 경우가 많고, 무한 반복과 비용 폭증을 막음 |
 | 해석 직후 지역·단위를 확인 | 지원하지 않는 질문을 LLM 1회 호출로 끝냄. 프롬프트에는 가능한 단위만이 아니라 전체 단위 목록도 보여줘, 모델이 '구별' 요청을 가능한 단위인 '행정동'으로 바꿔버리지 않게 함 |
 | 계획이 해석과 다르면 거부 (`PLAN_INTERPRETATION_MISMATCH`) | LLM이 지원 범위로 몰래 바꾸는 것을 결정론적으로 차단 |
@@ -1075,6 +1087,7 @@ FROM analysis.run GROUP BY 1, 2, 3 ORDER BY 1, 2;
 | 새 분석 유형 (intent) | `domain/enums.py`(`AnalysisIntent`) → `domain/policies.py`(정책) → `plan_validator.check_policy` → 프롬프트 → 필요하면 화면 문구 |
 | 새 개념 정의 (예: 노인 = 65세 이상) | `domain/policies.py`의 `definitions` |
 | 검증 규칙 추가 | `validation/plan_validator.py` 또는 `result_validator.py` + 단위 테스트 |
+| 새 워크플로 단계 | `domain/enums.py`(`WorkflowStep`) → `workflows/analysis_workflow.py`(단계 함수, `_STEPS`, `_build_graph()`의 엣지) → 화면 단계 이름 `frontend/src/components/ErrorPanel.tsx`(`STEP_NAMES`) |
 | LLM 모델 교체 | `.env`의 `LLM_PROVIDER`, `OPENAI_MODEL`, `OLLAMA_MODEL`. 새 공급자는 `llm/`에 어댑터를 추가하고 `factory.py`에 연결 |
 | 임베딩 모델 교체 | `OPENAI_EMBEDDING_MODEL` 변경 → `embed-catalog`(모델 변경은 자동 감지). 차원을 바꾸려면 `schema.sql`의 `vector(1536)`과 `EMBEDDING_DIMENSIONS`를 함께 변경 |
 | 프롬프트 수정 | `agents/prompts.py` → 실제 모델로 E2E 확인. `$ref` 필드는 스키마 설명이 전달되지 않으니 프롬프트에 적을 것 |
